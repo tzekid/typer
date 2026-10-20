@@ -568,18 +568,19 @@ me_page :: proc(req: ^Request, res: ^Response) {
 	p := page_for(req)
 	_, token, _ := current_user(req)
 	message := ""
+	problem := false
 	switch query_value(req.query, "m") {
 	case "saved":
 		message = "Saved."
 	case "taken":
-		message = "That name is taken."
+		message, problem = "That name is taken.", true
 	case "invalid":
-		message = "Names are 2–24 letters, digits, spaces, dots, dashes or underscores."
+		message, problem = "Names are 2–24 letters, digits, spaces, dots, dashes or underscores.", true
 	case "welcome":
 		message = "This browser now types as you."
 	}
 	b := strings.builder_make()
-	render_me_page(&b, p, token, message)
+	render_me_page(&b, p, token, message, problem)
 	html_response(res, &b)
 }
 

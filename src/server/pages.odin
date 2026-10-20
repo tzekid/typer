@@ -87,11 +87,11 @@ page_start :: proc(b: ^strings.Builder, p: Page, title: string, kind: string, pr
 	w(b, asset_url("core.wasm"))
 	w(b, `" defer></script></head><body><header class="top"><a class="mark" href="/">&lt;{ typer }&gt;</a>`)
 	w(b, `<form class="theme" method="post" action="/theme"><button type="submit" data-theme-toggle aria-label="Switch between light and dark">&lt;{ <span class="glyph"></span> }&gt;</button></form><nav>`)
-	for item in ([?][2]string{{"/", "test"}, {"/leaderboard", "leaderboard"}, {"/history", "history"}, {"/settings", "settings"}}) {
+	for item in ([?][3]string{{"/", "play", "test"}, {"/leaderboard", "leaderboard", "leaderboard"}, {"/history", "history", "history"}, {"/settings", "settings", "settings"}}) {
 		w(b, `<a href="`)
 		w(b, item[0])
 		w(b, `"`)
-		if item[1] == kind do w(b, ` aria-current="page"`)
+		if item[2] == kind do w(b, ` aria-current="page"`)
 		w(b, `>`)
 		w(b, item[1])
 		w(b, `</a>`)
@@ -110,7 +110,50 @@ page_start :: proc(b: ^strings.Builder, p: Page, title: string, kind: string, pr
 
 @(private)
 page_end :: proc(b: ^strings.Builder) {
-	w(b, `</main></body></html>`)
+	w(b, `</main><footer class="foot"><a href="https://github.com/tzekid/typer">source</a> · rules, words and quotes from <a href="https://monkeytype.com">Monkeytype</a></footer></body></html>`)
+}
+
+// A row of the settings and "you" pages: what it is on the left, the
+// control on the right.
+@(private)
+setting_start :: proc(b: ^strings.Builder, title: string, about: string) {
+	w(b, `<section class="setting"><div class="about"><h3>`)
+	engine.html_text(b, title)
+	w(b, `</h3><p>`)
+	engine.html_text(b, about)
+	w(b, `</p></div><div class="control">`)
+}
+
+@(private)
+setting_end :: proc(b: ^strings.Builder) {
+	w(b, `</div></section>`)
+}
+
+// Pill-shaped radio choices; the inputs stay real for forms and keyboards.
+@(private)
+segmented :: proc(b: ^strings.Builder, name: string, label: string, choices: [][2]string, checked: string) {
+	w(b, `<div class="seg" role="radiogroup" aria-label="`)
+	engine.html_attr(b, label)
+	w(b, `">`)
+	for c in choices {
+		w(b, `<label><input type="radio" name="`)
+		w(b, name)
+		w(b, `" value="`)
+		w(b, c[0])
+		w(b, `"`)
+		if c[0] == checked do w(b, ` checked`)
+		w(b, `><span>`)
+		engine.html_text(b, c[1])
+		w(b, `</span></label>`)
+	}
+	w(b, `</div>`)
+}
+
+@(private)
+toast :: proc(b: ^strings.Builder, message: string) {
+	w(b, `<p class="toast" role="status">`)
+	engine.html_text(b, message)
+	w(b, `</p>`)
 }
 
 @(private)
@@ -178,18 +221,21 @@ Test_Page :: struct {
 render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	s := t.setup
 	page_start(b, p, "typer", "test", {"DMMono-latin.woff2", "core.wasm"})
-	w(b, `<nav class="modes" aria-label="test setup">`)
-	if s.mode != .Quote {
-		w(b, `<span class="group">`)
+	// The bar keeps its width whatever the mode: punctuation and numbers dim
+	// for quotes, and every mode's options share one stacked slot.
+	w(b, `<nav class="bar" aria-label="test setup"><span class="group`)
+	if s.mode == .Quote {
+		w(b, ` off" title="quotes come with their own punctuation and numbers"><span>punctuation</span><span>numbers</span>`)
+	} else {
+		w(b, `">`)
 		x := s
 		x.punctuation = !s.punctuation
 		mode_link(b, "punctuation", x, s.punctuation)
 		x = s
 		x.numbers = !s.numbers
 		mode_link(b, "numbers", x, s.numbers)
-		w(b, `</span>`)
 	}
-	w(b, `<span class="group">`)
+	w(b, `</span><i class="sep"></i><span class="group">`)
 	for m in ([?]engine.Mode{.Time, .Words, .Quote}) {
 		x := s
 		x.mode = m
@@ -198,25 +244,31 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 		}
 		mode_link(b, mode_word(m), x, s.mode == m)
 	}
-	w(b, `</span><span class="group">`)
-	switch s.mode {
-	case .Quote:
+	w(b, `</span><i class="sep"></i><span class="group stack">`)
+	for m in ([?]engine.Mode{.Time, .Words, .Quote}) {
+		here := m == s.mode
+		w(b, `<span class="set"`)
+		if !here do w(b, ` inert`)
+		w(b, `>`)
 		x := s
-		x.quotes = QUOTE_ALL
-		mode_link(b, "all", x, s.quotes == QUOTE_ALL)
-		for name, g in engine.QUOTE_GROUP_NAMES {
-			x.quotes = 1 << u32(g)
-			mode_link(b, name, x, s.quotes == x.quotes)
+		x.mode = m
+		if m == .Quote {
+			x.quotes = QUOTE_ALL
+			mode_link(b, "all", x, here && s.quotes == QUOTE_ALL)
+			for name, g in engine.QUOTE_GROUP_NAMES {
+				x.quotes = 1 << u32(g)
+				mode_link(b, name, x, here && s.quotes == x.quotes)
+			}
+		} else {
+			options := [?]i32{15, 30, 60, 120} if m == .Time else [?]i32{10, 25, 50, 100}
+			for n in options {
+				x.mode2 = n
+				mode_link(b, int_label(n), x, here && s.mode2 == n)
+			}
 		}
-	case .Time, .Words, .Zen, .Custom:
-		options := [?]i32{15, 30, 60, 120} if s.mode == .Time else [?]i32{10, 25, 50, 100}
-		for n in options {
-			x := s
-			x.mode2 = n
-			mode_link(b, int_label(n), x, s.mode2 == n)
-		}
+		w(b, `</span>`)
 	}
-	w(b, `</span><a class="lang" href="/languages?`)
+	w(b, `</span><i class="sep"></i><a class="lang" href="/languages?`)
 	q := strings.builder_make(context.temp_allocator)
 	setup_query(&q, s)
 	engine.html_attr(b, strings.to_string(q))
@@ -265,7 +317,7 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 }
 
 render_result_page :: proc(b: ^strings.Builder, p: Page, v: engine.Result_View, attempts: []Stored) {
-	page_start(b, p, "typer result", "result")
+	page_start(b, p, "result · typer", "result")
 	engine.render_result(b, v)
 	if len(attempts) > 1 {
 		w(b, `<h2>`)
@@ -273,7 +325,7 @@ render_result_page :: proc(b: ^strings.Builder, p: Page, v: engine.Result_View, 
 		w(b, ` on this quote</h2>`)
 		results_table(b, attempts, false, 0, v.id)
 	}
-	w(b, `<p class="actions"><a href="/">new test</a> · <a href="/leaderboard">leaderboard</a></p>`)
+	w(b, `<p class="after"><a class="button" href="/">play</a><a class="button quiet" href="/leaderboard">leaderboard</a></p>`)
 	page_end(b)
 }
 
@@ -316,7 +368,9 @@ results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlig
 		}
 		w(b, `>`)
 		if ranked {
-			w(b, `<td class="num">`)
+			w(b, `<td class="num rank`)
+			if i < 3 do w(b, ` top`)
+			w(b, `">`)
 			strings.write_int(b, i + 1)
 			w(b, `</td><td><a href="/results/`)
 			strings.write_i64(b, s.id)
@@ -324,12 +378,13 @@ results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlig
 			engine.html_text(b, s.user_name)
 			w(b, `</a></td>`)
 		} else {
-			w(b, `<td><a href="/results/`)
+			w(b, `<td class="date"><a href="/results/`)
 			strings.write_i64(b, s.id)
 			w(b, `">`)
 			write_date(b, s.created_at)
 			w(b, `</a></td><td>`)
 			setup_label(b, s)
+			if !s.valid do w(b, `<span class="tag">invalid</span>`)
 			w(b, `</td>`)
 		}
 		w(b, `<td class="num strong">`)
@@ -342,7 +397,7 @@ results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlig
 		engine.write_fixed(b, s.cons, 2)
 		w(b, `%</td>`)
 		if ranked {
-			w(b, `<td>`)
+			w(b, `<td class="date">`)
 			write_date(b, s.created_at)
 			w(b, `</td>`)
 		}
@@ -352,7 +407,7 @@ results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlig
 }
 
 render_history_page :: proc(b: ^strings.Builder, p: Page, bests: []Stored, recent: []Stored) {
-	page_start(b, p, "typer history", "history")
+	page_start(b, p, "history · typer", "history")
 	if !p.known {
 		w(b, `<p class="empty">Your history starts with your first finished test. It stays with this browser; the key link on your name's page brings it to another one.</p>`)
 		page_end(b)
@@ -362,7 +417,21 @@ render_history_page :: proc(b: ^strings.Builder, p: Page, bests: []Stored, recen
 	if len(bests) == 0 {
 		w(b, `<p class="empty">No valid results yet.</p>`)
 	} else {
-		results_table(b, bests, false, 0, 0)
+		w(b, `<div class="bests">`)
+		for s in bests {
+			w(b, `<a class="best" href="/results/`)
+			strings.write_i64(b, s.id)
+			w(b, `"><span class="what">`)
+			setup_label(b, s)
+			w(b, `</span><span class="wpm">`)
+			engine.write_fixed(b, s.wpm, 0)
+			w(b, `<small>wpm</small></span><span class="more">`)
+			engine.write_fixed(b, s.acc, 0)
+			w(b, `% acc · `)
+			write_day(b, s.created_at)
+			w(b, `</span></a>`)
+		}
+		w(b, `</div>`)
 	}
 	w(b, `<h2>recent</h2>`)
 	if len(recent) == 0 {
@@ -407,29 +476,38 @@ board_link :: proc(b: ^strings.Builder, label: string, board: Board, on: bool) {
 }
 
 render_leaderboard_page :: proc(b: ^strings.Builder, p: Page, board: Board, rows: []Stored) {
-	page_start(b, p, "typer leaderboard", "leaderboard")
-	w(b, `<nav class="modes" aria-label="leaderboard"><span class="group"><span class="label">time</span>`)
-	for n in BOARD_TIMES {
-		x := Board{mode = .Time, mode2 = n, language = board.language}
-		board_link(b, int_label(n), x, board.mode == .Time && board.mode2 == n)
+	page_start(b, p, "leaderboard · typer", "leaderboard")
+	// The same bar as the test page: a mode, then its options in one
+	// stacked slot so the bar keeps its width.
+	quote_lang := engine.quote_language(board.language)
+	w(b, `<nav class="bar" aria-label="leaderboard"><span class="group">`)
+	board_link(b, "time", Board{mode = .Time, mode2 = 30, language = board.language}, board.mode == .Time)
+	board_link(b, "words", Board{mode = .Words, mode2 = 25, language = board.language}, board.mode == .Words)
+	board_link(b, "quote", Board{mode = .Quote, qgroup = 1, language = quote_lang}, board.mode == .Quote)
+	w(b, `</span><i class="sep"></i><span class="group stack">`)
+	for m in ([?]engine.Mode{.Time, .Words, .Quote}) {
+		here := m == board.mode
+		w(b, `<span class="set"`)
+		if !here do w(b, ` inert`)
+		w(b, `>`)
+		if m == .Quote {
+			for name, g in engine.QUOTE_GROUP_NAMES {
+				board_link(b, name, Board{mode = .Quote, qgroup = i32(g), language = quote_lang}, here && board.qgroup == i32(g))
+			}
+		} else {
+			for n in (BOARD_TIMES if m == .Time else BOARD_WORDS) {
+				board_link(b, int_label(n), Board{mode = m, mode2 = n, language = board.language}, here && board.mode2 == n)
+			}
+		}
+		w(b, `</span>`)
 	}
-	w(b, `</span><span class="group"><span class="label">words</span>`)
-	for n in BOARD_WORDS {
-		x := Board{mode = .Words, mode2 = n, language = board.language}
-		board_link(b, int_label(n), x, board.mode == .Words && board.mode2 == n)
-	}
-	w(b, `</span><span class="group"><span class="label">quote</span>`)
-	for name, g in engine.QUOTE_GROUP_NAMES {
-		x := Board{mode = .Quote, qgroup = i32(g), language = engine.quote_language(board.language)}
-		board_link(b, name, x, board.mode == .Quote && board.qgroup == i32(g))
-	}
-	w(b, `</span><a class="lang" href="/languages?board=1&amp;mode=`)
+	w(b, `</span><i class="sep"></i><a class="lang" href="/languages?board=1&amp;mode=`)
 	w(b, mode_word(board.mode))
 	w(b, `">`)
 	engine.html_text(b, board.language)
 	w(b, `</a></nav>`)
 	if len(rows) == 0 {
-		w(b, `<p class="empty">Nobody has a valid result here yet.</p>`)
+		w(b, `<p class="empty">Nobody has a valid result here yet. <a href="/">Be the first.</a></p>`)
 	} else {
 		results_table(b, rows, true, p.user.id if p.known else 0, 0)
 	}
@@ -437,61 +515,53 @@ render_leaderboard_page :: proc(b: ^strings.Builder, p: Page, board: Board, rows
 	page_end(b)
 }
 
-render_me_page :: proc(b: ^strings.Builder, p: Page, token: string, message: string) {
-	page_start(b, p, "typer · you", "me")
+render_me_page :: proc(b: ^strings.Builder, p: Page, token: string, message: string, problem: bool) {
+	page_start(b, p, "you · typer", "me")
 	if !p.known {
 		w(b, `<p class="empty">You become a typist the moment you finish a test: this browser keeps your name and history, no account needed.</p>`)
 		page_end(b)
 		return
 	}
-	w(b, `<section class="you"><h2>your name</h2><form method="post" action="/me/name" class="row"><input name="name" maxlength="24" required value="`)
+	setting_start(b, "name", "How you appear on the leaderboard.")
+	w(b, `<form method="post" action="/me/name" class="row"><input name="name" maxlength="24" required value="`)
 	engine.html_attr(b, p.user.name)
-	w(b, `" aria-label="display name"><button>save</button></form>`)
-	if message != "" {
-		w(b, `<p class="message">`)
+	w(b, `" aria-label="name"><button>save</button></form>`)
+	if message != "" && problem {
+		w(b, `<p class="problem">`)
 		engine.html_text(b, message)
 		w(b, `</p>`)
 	}
-	w(b, `<h2>your key link</h2><p class="note">Open it on another device to type as `)
-	engine.html_text(b, p.user.name)
-	w(b, ` there. Anyone with it can, so keep it to yourself.</p><input class="key" readonly value="`)
+	setting_end(b)
+	setting_start(b, "key link", "Open it on another device to type as you there. Anyone with it can, so keep it to yourself.")
+	w(b, `<div class="row"><input class="key" readonly value="`)
 	engine.html_attr(b, key_link(token))
-	w(b, `" aria-label="key link">`)
-	w(b, `<h2>this browser</h2><form method="post" action="/me/forget"><button class="quiet">forget me here</button></form><p class="note">Your results stay; only this browser forgets the key.</p></section>`)
+	w(b, `" aria-label="key link"><button type="button" class="quiet" data-copy>copy</button></div>`)
+	setting_end(b)
+	setting_start(b, "this browser", "Forgetting only signs this browser out; your results stay, and the key link brings them back.")
+	w(b, `<form method="post" action="/me/forget"><button class="quiet danger">forget me here</button></form>`)
+	setting_end(b)
+	if message != "" && !problem {
+		toast(b, message)
+	}
 	page_end(b)
 }
 
 render_settings_page :: proc(b: ^strings.Builder, p: Page) {
-	page_start(b, p, "typer settings", "settings")
-	w(b, `<form class="settings" method="post" action="/settings" data-autosave><fieldset><legend>smooth motion</legend>`)
-	for c in Caret {
-		w(b, `<label><input type="radio" name="caret" value="`)
-		w(b, CARET_NAMES[c])
-		w(b, `"`)
-		if c == p.caret do w(b, ` checked`)
-		w(b, `> `)
-		w(b, CARET_NAMES[c])
-		w(b, `</label>`)
-	}
-	w(b, `<p class="note">How the caret and the lines glide. Off moves them in the same frame as the letter.</p></fieldset><fieldset><legend>theme</legend>`)
-	for t in ([?][2]string{{"", "system"}, {"light", "light"}, {"dark", "dark"}}) {
-		w(b, `<label><input type="radio" name="theme" value="`)
-		w(b, t[0] if t[0] != "" else "system")
-		w(b, `"`)
-		if p.theme == t[0] do w(b, ` checked`)
-		w(b, `> `)
-		w(b, t[1])
-		w(b, `</label>`)
-	}
-	w(b, `</fieldset><noscript><button>save</button></noscript><p class="message" data-saved hidden>saved</p></form>`)
+	page_start(b, p, "settings · typer", "settings")
+	w(b, `<form class="settings" method="post" action="/settings" data-autosave>`)
+	setting_start(b, "smooth motion", "How the caret and the lines glide. Off moves them in the same frame as the letter.")
+	segmented(b, "caret", "smooth motion", {{"off", "off"}, {"fast", "fast"}, {"medium", "medium"}, {"slow", "slow"}}, CARET_NAMES[p.caret])
+	setting_end(b)
+	setting_start(b, "theme", "Light or dark, or whatever your system uses. The ◐ button up top flips it too.")
+	segmented(b, "theme", "theme", {{"system", "system"}, {"light", "light"}, {"dark", "dark"}}, p.theme if p.theme != "" else "system")
+	setting_end(b)
+	w(b, `<noscript><p><button>save</button></p></noscript><p class="toast" role="status" data-saved hidden>saved</p></form>`)
 	page_end(b)
 }
 
 render_languages_page :: proc(b: ^strings.Builder, p: Page, s: Test_Setup, board: bool, languages: []string) {
-	page_start(b, p, "typer languages", "languages")
-	w(b, `<h2>`)
-	w(b, "quote languages" if s.mode == .Quote else "languages")
-	w(b, `</h2><ul class="languages">`)
+	page_start(b, p, "languages · typer", "languages")
+	w(b, `<div class="find"><input type="search" placeholder="find a language" aria-label="find a language" autocomplete="off" data-filter=".languages li" autofocus></div><ul class="languages">`)
 	for l in languages {
 		w(b, `<li><a href="`)
 		if board {
@@ -508,8 +578,21 @@ render_languages_page :: proc(b: ^strings.Builder, p: Page, s: Test_Setup, board
 		engine.html_text(b, l)
 		w(b, `</a></li>`)
 	}
-	w(b, `</ul>`)
+	w(b, `</ul><p class="empty" data-none hidden>No language by that name.</p>`)
 	page_end(b)
+}
+
+// UTC "YYYY-MM-DD" from unix milliseconds.
+write_day :: proc(b: ^strings.Builder, unix_ms: i64) {
+	t := time.unix(unix_ms / 1000, 0)
+	y, mon, d := time.date(t)
+	strings.write_int(b, y)
+	strings.write_byte(b, '-')
+	if int(mon) < 10 do strings.write_byte(b, '0')
+	strings.write_int(b, int(mon))
+	strings.write_byte(b, '-')
+	if d < 10 do strings.write_byte(b, '0')
+	strings.write_int(b, d)
 }
 
 // UTC "YYYY-MM-DD HH:MM" from unix milliseconds.

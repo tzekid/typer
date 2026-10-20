@@ -26,7 +26,7 @@
   --main-big: #d64937;
   --caret: #d64937;
   --sub: #766a64;
-  --sub-alt: #f7f7f7;
+  --sub-alt: #f5f2f0;
   --text: #282421;
   --error: #9f1d20;
   --error-extra: #c57779;
@@ -38,6 +38,8 @@
   --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --display: "Quando", Georgia, serif;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --radius: 10px;
+  --shadow: 0 10px 30px rgba(40, 36, 33, 0.1);
   color-scheme: light;
 }
 
@@ -56,6 +58,7 @@
     --border: #383838;
     --wash: rgba(240, 107, 93, 0.1);
     --selection: rgba(240, 107, 93, 0.34);
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
     color-scheme: dark;
   }
 }
@@ -74,6 +77,7 @@
   --border: #383838;
   --wash: rgba(240, 107, 93, 0.1);
   --selection: rgba(240, 107, 93, 0.34);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
 
@@ -93,6 +97,13 @@ body {
   font-family: var(--ui);
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  accent-color: var(--main-big);
 }
 
 ::selection {
@@ -131,6 +142,7 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 1rem;
+  width: 100%;
   max-width: 1040px;
   margin: 0 auto;
   padding: 1.6rem 1.25rem;
@@ -201,6 +213,21 @@ a:hover {
   text-decoration: none;
 }
 
+.top nav a {
+  position: relative;
+}
+
+.top nav a[aria-current]::after {
+  content: "";
+  position: absolute;
+  right: 0.14em;
+  bottom: -0.5rem;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--main-big);
+}
+
 .top nav .me {
   color: var(--main);
   letter-spacing: 0.04em;
@@ -208,10 +235,19 @@ a:hover {
   font-size: 0.85rem;
 }
 
+.top nav .me[aria-current] {
+  color: var(--main);
+}
+
+.top nav .me[aria-current]::after {
+  right: 0;
+}
+
 main {
+  width: 100%;
   max-width: 1040px;
   margin: 0 auto;
-  padding: 0 1.25rem 4rem;
+  padding: 0.8rem 1.25rem 3rem;
 }
 
 main:focus {
@@ -244,52 +280,70 @@ html.loading::before {
   }
 }
 
-/* ------ mode bar */
+/* ------ setup bar: the test's options, and the leaderboard's */
 
-.modes {
+.bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
-  gap: 0.5rem 1.6rem;
-  margin: 1.2rem auto 3.6rem;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.4rem auto 3.4rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius);
+  background: var(--sub-alt);
   font-size: 0.82rem;
 }
 
-.modes .group {
+.bar .group {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.95rem;
-  padding-right: 1.6rem;
-  border-right: 1px solid var(--rule);
 }
 
-.modes .group:last-of-type {
-  border-right: 0;
-  padding-right: 0;
-}
-
-.modes .label {
-  color: var(--text);
-  opacity: 0.55;
-}
-
-.modes a {
+.bar a,
+.bar .off > span {
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
   color: var(--sub);
+  white-space: nowrap;
 }
 
-.modes a.on {
-  color: var(--main);
-}
-
-.modes a:hover {
+.bar a:hover {
   color: var(--text);
   text-decoration: none;
 }
 
-.modes .lang {
-  color: var(--sub);
-  border-bottom: 1px dotted var(--border);
+.bar a.on {
+  color: var(--main);
+}
+
+/* punctuation and numbers, which quotes don't take */
+.bar .off > span {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.bar .sep {
+  width: 3px;
+  height: 1.1rem;
+  margin: 0 0.4rem;
+  border-radius: 2px;
+  background: var(--bg);
+}
+
+/* Every mode's options in one cell, so the bar never changes width. */
+.bar .stack {
+  display: grid;
+}
+
+.bar .stack > .set {
+  display: flex;
+  grid-area: 1 / 1;
+  justify-content: center;
+}
+
+.bar .stack > .set[inert] {
+  visibility: hidden;
 }
 
 /* ------ typing stage */
@@ -297,6 +351,37 @@ html.loading::before {
 .stage {
   position: relative;
   min-height: 180px;
+}
+
+/* Out of focus, the words blur and say how to come back. */
+.stage .lines-clip {
+  transition: filter 220ms var(--ease), opacity 220ms var(--ease);
+}
+
+.stage.unfocused .lines-clip {
+  filter: blur(4px);
+  opacity: 0.4;
+}
+
+.stage.unfocused::after {
+  content: "click or press any key to type";
+  position: absolute;
+  top: 45px;
+  right: 0;
+  left: 0;
+  display: grid;
+  height: 135px;
+  place-items: center;
+  color: var(--text);
+  font-size: 0.92rem;
+  pointer-events: none;
+  animation: appear 220ms var(--ease);
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
 }
 
 /* Page text above the lines, so it never moves with them. */
@@ -731,47 +816,209 @@ kbd {
   text-decoration: line-through;
 }
 
-/* ------ tables and pages */
+/* ------ buttons and fields */
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--main-big);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--main);
+  font: 0.86rem var(--ui);
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 160ms var(--ease), border-color 160ms var(--ease), color 160ms var(--ease);
+}
+
+button:hover,
+.button:hover {
+  background: var(--wash);
+  text-decoration: none;
+}
+
+button.quiet,
+.button.quiet {
+  border-color: var(--border);
+  color: var(--sub);
+}
+
+button.quiet:hover,
+.button.quiet:hover {
+  border-color: var(--sub);
+  background: transparent;
+  color: var(--text);
+}
+
+button.danger:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+input[type="text"],
+input[type="search"],
+input:not([type]) {
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: 0.92rem var(--mono);
+  transition: border-color 160ms var(--ease);
+}
+
+input:focus-visible {
+  outline: none;
+  border-color: var(--main-big);
+}
+
+input.key {
+  color: var(--sub);
+  font-size: 0.78rem;
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+  width: 0.7rem;
+  height: 0.7rem;
+  background: var(--sub);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1 1l8 8M9 1l-8 8' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  cursor: pointer;
+  appearance: none;
+}
+
+.tag {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--sub);
+  font-size: 0.68rem;
+  vertical-align: 0.1em;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ------ pages */
 
 h2 {
-  margin: 2.6rem 0 1rem;
+  margin: 2.8rem 0 1rem;
   color: var(--sub);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: normal;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
+main > h2:first-child {
+  margin-top: 1rem;
+}
+
+.note {
+  color: var(--sub);
+  font-size: 0.82rem;
+}
+
+.empty {
+  margin: 0;
+  padding: 2.4rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--sub);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.problem {
+  margin: 0;
+  color: var(--error);
+  font-size: 0.84rem;
+}
+
+.message {
+  color: var(--main);
+}
+
+/* A short confirmation along the bottom, gone on its own. */
+.toast {
+  position: fixed;
+  bottom: 4.5rem;
+  left: 50%;
+  z-index: 20;
+  margin: 0;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  background: var(--text);
+  box-shadow: var(--shadow);
+  color: var(--bg);
+  font-size: 0.84rem;
+  pointer-events: none;
+  animation: toast 2.6s var(--ease) forwards;
+}
+
+@keyframes toast {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  8%,
+  82% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 0);
+    visibility: hidden;
+  }
+}
+
+/* tables: leaderboards, history, attempts at a quote */
+
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.86rem;
+  font-size: 0.88rem;
   font-variant-numeric: tabular-nums;
 }
 
 th {
+  padding: 0.55rem 0.8rem;
   color: var(--sub);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: normal;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-align: left;
   text-transform: uppercase;
 }
 
-th,
 td {
-  padding: 0.6rem 0.7rem;
+  padding: 0.75rem 0.8rem;
   border-top: 1px solid var(--rule);
 }
 
-thead th {
-  border-top: 0;
+tbody tr {
+  transition: background 120ms var(--ease);
 }
 
-tbody tr:hover,
+tbody tr:hover {
+  background: var(--sub-alt);
+}
+
 tr.you,
 tr.current {
   background: var(--wash);
+}
+
+tr.you td:first-child,
+tr.current td:first-child {
+  box-shadow: inset 2px 0 var(--main-big);
 }
 
 tr.you a {
@@ -780,10 +1027,26 @@ tr.you a {
 
 tr.invalid td {
   color: var(--sub);
+  opacity: 0.75;
 }
 
 td a {
   color: var(--text);
+}
+
+td.date,
+td.date a {
+  color: var(--sub);
+}
+
+.rank {
+  width: 3rem;
+  color: var(--sub);
+}
+
+.rank.top {
+  color: var(--main-big);
+  font-weight: 600;
 }
 
 .num {
@@ -795,104 +1058,204 @@ td a {
   font-weight: 600;
 }
 
-.empty,
-.note,
-.actions,
-.message {
-  color: var(--sub);
+/* personal bests: a card per test */
+
+.bests {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.8rem;
 }
 
-.note {
-  font-size: 0.82rem;
-}
-
-.message {
-  color: var(--main);
-}
-
-.message.problem {
-  color: var(--error);
-}
-
-.you {
-  max-width: 34rem;
-}
-
-.row {
-  display: flex;
-  gap: 0.6rem;
-}
-
-input[type="text"],
-input:not([type]),
-input.key {
-  width: 100%;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
+.best {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem 1.15rem;
+  border-radius: var(--radius);
+  background: var(--sub-alt);
   color: var(--text);
-  font: 0.92rem var(--mono);
-}
-
-input.key {
-  color: var(--sub);
-  font-size: 0.78rem;
-}
-
-button {
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--main-big);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--main);
-  font: 0.86rem var(--ui);
-  cursor: pointer;
   transition: background 160ms var(--ease);
 }
 
-button:hover {
+.best:hover {
   background: var(--wash);
+  text-decoration: none;
 }
 
-button.quiet {
-  border-color: var(--border);
+.best .what,
+.best .more {
   color: var(--sub);
+  font-size: 0.76rem;
 }
 
-.settings fieldset {
-  margin: 0 0 2rem;
-  padding: 0;
-  border: 0;
+.best .wpm {
+  color: var(--main-big);
+  font: 2.2rem/1.05 var(--display);
 }
 
-.settings legend {
-  margin-bottom: 0.8rem;
+.best .wpm small {
+  margin-left: 0.35rem;
   color: var(--sub);
-  font-size: 0.74rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font: 0.78rem var(--ui);
 }
 
-.settings label {
-  margin-right: 1.4rem;
-  font-size: 0.92rem;
+/* settings and "you": a row per setting, what on the left, how on the right */
+
+.setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.9rem 3rem;
+  align-items: center;
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.setting:first-child {
+  padding-top: 0.6rem;
+}
+
+.setting h3 {
+  margin: 0 0 0.35rem;
+  color: var(--text);
+  font-size: 0.98rem;
+  font-weight: 600;
+}
+
+.setting p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--sub);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.setting .control {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+}
+
+.setting input:not([type]) {
+  width: 16rem;
+}
+
+.setting input.key {
+  width: 24rem;
+}
+
+/* pill-shaped choices over real radio inputs */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--sub-alt);
+}
+
+.seg label {
+  position: relative;
+  cursor: pointer;
+}
+
+.seg input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.seg span {
+  display: block;
+  padding: 0.45rem 1rem;
+  border-radius: 7px;
+  color: var(--sub);
+  font-size: 0.86rem;
+  transition: background 160ms var(--ease), color 160ms var(--ease);
+}
+
+.seg label:hover span {
+  color: var(--text);
+}
+
+.seg input:checked + span {
+  background: var(--main-big);
+  color: var(--bg);
+}
+
+.seg input:focus-visible + span {
+  outline: 2px solid var(--caret);
+  outline-offset: 2px;
+}
+
+/* languages */
+
+.find {
+  margin: 0.6rem 0 1.8rem;
+}
+
+.find input {
+  width: min(24rem, 100%);
+  padding: 0.7rem 1rem;
+  border-radius: var(--radius);
+  background: var(--sub-alt);
+  border-color: transparent;
+  font-family: var(--ui);
 }
 
 .languages {
-  columns: 4 12rem;
+  margin: 0 0 1rem;
   padding: 0;
+  columns: 4 12rem;
+  column-gap: 2rem;
   list-style: none;
   font-size: 0.86rem;
-  line-height: 1.9;
+  line-height: 2;
 }
 
 .languages a {
   color: var(--sub);
 }
 
+.languages a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
 .languages a.on {
   color: var(--main);
+}
+
+/* ------ footer */
+
+.foot {
+  margin-top: auto;
+  padding: 2rem 1.25rem 1.6rem;
+  color: var(--sub);
+  font-size: 0.74rem;
+  text-align: center;
+}
+
+.foot a {
+  color: var(--sub);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 0.2em;
+}
+
+.foot a:hover {
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .setting {
+    grid-template-columns: 1fr;
+  }
+  .setting .control {
+    justify-items: start;
+  }
+  .setting input.key {
+    width: 100%;
+  }
 }
 
 @media (max-width: 640px) {
@@ -902,6 +1265,14 @@ button.quiet {
   .top nav {
     width: 100%;
     margin-left: 0;
+    gap: 0.9rem 1.1rem;
+  }
+  /* the bar wraps by group here; separators would dangle at line ends */
+  .bar {
+    gap: 0.2rem 0.6rem;
+  }
+  .bar .sep {
+    display: none;
   }
   .result {
     grid-template-columns: 1fr;

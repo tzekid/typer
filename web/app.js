@@ -2,7 +2,7 @@
 // - the <{ ◐ }> theme switch;
 // - in-place navigation: links and forms fetch the next page and swap in its
 //   <header> and <main>, so nothing reloads and the island keeps running;
-// - settings that save as they change;
+// - settings that save as they change, copy buttons, the language filter;
 // - the result chart's hover readout and series toggles.
 // Without script, all of it still works as plain links and forms.
 (() => {
@@ -127,7 +127,7 @@
     before.replaceWith(main);
     document.title = doc.title;
     scrollTo(0, y);
-    if (!window.typer?.mount(main)) main.focus({ preventScroll: true });
+    if (!window.typer?.mount(main)) (main.querySelector("[autofocus]") || main).focus({ preventScroll: true });
   }
 
   // Error responses are plain text (bad input, rate limit): show them in place.
@@ -146,11 +146,51 @@
     if (e.target.name === "theme") setTheme(e.target.value === "system" ? "" : e.target.value, true);
     const saved = form.querySelector("[data-saved]");
     fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)) }).then((res) => {
-      if (!res.ok || !saved) return;
-      saved.hidden = false;
-      clearTimeout(saved.timer);
-      saved.timer = setTimeout(() => (saved.hidden = true), 1400);
+      if (res.ok && saved) replay(saved);
     });
+  });
+
+  // Shows a toast again from the start (its CSS animation hides it).
+  function replay(toast) {
+    toast.hidden = true;
+    void toast.offsetWidth;
+    toast.hidden = false;
+  }
+
+  // ------ copy buttons: the field just before them
+
+  document.addEventListener("click", (e) => {
+    const button = e.target.closest("[data-copy]");
+    if (!button) return;
+    const field = button.previousElementSibling;
+    navigator.clipboard.writeText(field.value).then(() => {
+      button.textContent = "copied";
+      setTimeout(() => (button.textContent = "copy"), 1500);
+    });
+    field.select();
+  });
+
+  // ------ filter: typing in it narrows a list (the languages)
+
+  document.addEventListener("input", (e) => {
+    const box = e.target.closest("[data-filter]");
+    if (!box) return;
+    const needle = box.value.trim().toLowerCase().replace(/\s+/g, "_");
+    let shown = 0;
+    for (const item of document.querySelectorAll(box.dataset.filter)) {
+      const hit = item.textContent.includes(needle);
+      item.hidden = !hit;
+      shown += hit;
+    }
+    const none = document.querySelector("[data-none]");
+    if (none) none.hidden = shown > 0;
+  });
+
+  // Enter in the filter opens the first language left.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !e.target.matches("[data-filter]")) return;
+    const first = [...document.querySelectorAll(e.target.dataset.filter)].find((x) => !x.hidden);
+    first?.querySelector("a")?.click();
   });
 
   // ------ result chart: per-second readout on hover, series toggles

@@ -602,6 +602,19 @@
     stage.addEventListener("pointerdown", (e) => {
       if (!e.target.closest("button, a")) input.focus();
     });
+
+    // Out of focus for a moment (not just passing to a link): say so.
+    let away = 0;
+    input.addEventListener("blur", () => {
+      clearTimeout(away);
+      away = setTimeout(() => {
+        if (el?.input === input && document.activeElement !== input && el.result.hidden) stage.classList.add("unfocused");
+      }, 500);
+    });
+    input.addEventListener("focus", () => {
+      clearTimeout(away);
+      stage.classList.remove("unfocused");
+    });
     after.querySelector("[data-next]").addEventListener("click", () => restart(false));
     after.querySelector("[data-repeat]").addEventListener("click", () => restart(true));
   }
