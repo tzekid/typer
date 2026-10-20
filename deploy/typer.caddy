@@ -1,0 +1,14 @@
+# /etc/caddy/conf.d/typer.caddy
+typer.plosca.ru {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+
+	@probe path /healthz /readyz
+	respond @probe 404
+
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy 127.0.0.1:9334
+}

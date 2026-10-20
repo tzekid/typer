@@ -1,0 +1,624 @@
+/* FONT:<file> is replaced by the font's hashed URL at build time. */
+@font-face {
+  font-family: "DM Mono";
+  src: url(FONT:DMMono-latin.woff2) format("woff2");
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "DM Mono";
+  src: url(FONT:DMMono-latin-ext.woff2) format("woff2");
+  font-display: block;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Quando";
+  src: url(FONT:Quando-latin.woff2) format("woff2");
+  font-display: swap;
+}
+
+/* light: plosca.ru's paper and ink, Analytico's semantics */
+:root {
+  --bg: #ffffff;
+  --main: #b53a2b;
+  --main-big: #d64937;
+  --caret: #d64937;
+  --sub: #766a64;
+  --sub-alt: #f7f7f7;
+  --text: #282421;
+  --error: #9f1d20;
+  --error-extra: #c57779;
+  --rule: #eeeeee;
+  --border: #d9d9d9;
+  --wash: rgba(214, 73, 55, 0.07);
+  --selection: rgba(0, 0, 0, 0.12);
+  --mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --display: "Quando", Georgia, serif;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171717;
+    --main: #ff6f61;
+    --main-big: #ff6f61;
+    --caret: #ff6f61;
+    --sub: #9a9a9a;
+    --sub-alt: #202020;
+    --text: #eeeeee;
+    --error: #f2a0a0;
+    --error-extra: #8f6262;
+    --rule: #262626;
+    --border: #383838;
+    --wash: rgba(240, 107, 93, 0.1);
+    --selection: rgba(240, 107, 93, 0.34);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #171717;
+  --main: #ff6f61;
+  --main-big: #ff6f61;
+  --caret: #ff6f61;
+  --sub: #9a9a9a;
+  --sub-alt: #202020;
+  --text: #eeeeee;
+  --error: #f2a0a0;
+  --error-extra: #8f6262;
+  --rule: #262626;
+  --border: #383838;
+  --wash: rgba(240, 107, 93, 0.1);
+  --selection: rgba(240, 107, 93, 0.34);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--selection);
+}
+
+a {
+  color: var(--main);
+  text-decoration: none;
+  transition: color 160ms var(--ease);
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--caret);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ------ header */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem;
+}
+
+.mark {
+  color: var(--main-big);
+  font-family: var(--display);
+  font-size: 1.55rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.mark:hover {
+  text-decoration: none;
+}
+
+.theme {
+  margin: 0;
+}
+
+.theme button {
+  padding: 0.2rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--main-big);
+  font: 0.95rem var(--display);
+  cursor: pointer;
+  transition: border-color 200ms var(--ease), color 200ms var(--ease);
+}
+
+.theme button:hover {
+  border-color: var(--main-big);
+}
+
+.theme .glyph::after {
+  content: "◐";
+}
+
+:root[data-theme="dark"] .theme .glyph::after {
+  content: "◑";
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme .glyph::after {
+    content: "◑";
+  }
+}
+
+.top nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.6rem;
+  margin-left: auto;
+}
+
+.top nav a {
+  color: var(--sub);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.top nav a[aria-current],
+.top nav a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.top nav .me {
+  color: var(--main);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 0.85rem;
+}
+
+main {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 1.25rem 4rem;
+}
+
+/* ------ mode bar */
+
+.modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.5rem 1.6rem;
+  margin: 1.2rem auto 3.6rem;
+  font-size: 0.82rem;
+}
+
+.modes .group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.95rem;
+  padding-right: 1.6rem;
+  border-right: 1px solid var(--rule);
+}
+
+.modes .group:last-of-type {
+  border-right: 0;
+  padding-right: 0;
+}
+
+.modes .label {
+  color: var(--text);
+  opacity: 0.55;
+}
+
+.modes a {
+  color: var(--sub);
+}
+
+.modes a.on {
+  color: var(--main);
+}
+
+.modes a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.modes .lang {
+  color: var(--sub);
+  border-bottom: 1px dotted var(--border);
+}
+
+/* ------ typing stage */
+
+.stage {
+  position: relative;
+  min-height: 180px;
+}
+
+#words {
+  display: block;
+  cursor: text;
+}
+
+/* Moved with transform only, so the compositor animates it. */
+.caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--caret);
+  clip-path: inset(19% 0);
+  transition-property: transform;
+  transition-timing-function: cubic-bezier(0.25, 0.8, 0.4, 1);
+  will-change: transform;
+  pointer-events: none;
+}
+
+.caret.idle {
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.typer-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  pointer-events: none;
+}
+
+.hint {
+  margin-top: 3.2rem;
+  color: var(--sub);
+  font-size: 0.74rem;
+  text-align: center;
+}
+
+kbd {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: 0.72rem var(--mono);
+}
+
+/* ------ result */
+
+.result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1.4rem 2.6rem;
+  align-items: center;
+}
+
+.result .big .label {
+  color: var(--sub);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.result .big .value {
+  color: var(--main-big);
+  font-family: var(--display);
+  font-size: 4.2rem;
+  line-height: 1.05;
+  margin-bottom: 0.4rem;
+}
+
+.result .more {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem 3rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--rule);
+}
+
+.result .more .label,
+.result .source .label {
+  color: var(--sub);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.result .more .value {
+  margin-top: 0.2rem;
+  color: var(--text);
+  font: 1.3rem var(--mono);
+}
+
+.result .source {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.result .source .label {
+  margin-right: 0.6rem;
+}
+
+.result .invalid {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--error);
+}
+
+.result .when {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--sub);
+  font-size: 0.8rem;
+}
+
+.chart {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart polyline {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart .wpm {
+  stroke: var(--main-big);
+  stroke-width: 2.5;
+}
+
+.chart .area {
+  fill: var(--main-big);
+  opacity: 0.08;
+  stroke: none;
+}
+
+.chart .burst {
+  stroke: var(--sub);
+  stroke-width: 1.75;
+  stroke-dasharray: 5 6;
+}
+
+.chart .err {
+  fill: none;
+  stroke: var(--error);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.chart .grid {
+  stroke: var(--rule);
+}
+
+.chart .axis {
+  fill: var(--sub);
+  font: 11px var(--ui);
+}
+
+/* ------ tables and pages */
+
+h2 {
+  margin: 2.6rem 0 1rem;
+  color: var(--sub);
+  font-size: 0.74rem;
+  font-weight: normal;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  color: var(--sub);
+  font-size: 0.72rem;
+  font-weight: normal;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+th,
+td {
+  padding: 0.6rem 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+
+thead th {
+  border-top: 0;
+}
+
+tbody tr:hover,
+tr.you,
+tr.current {
+  background: var(--wash);
+}
+
+tr.you a {
+  color: var(--main);
+}
+
+tr.invalid td {
+  color: var(--sub);
+}
+
+td a {
+  color: var(--text);
+}
+
+.num {
+  text-align: right;
+}
+
+.strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.empty,
+.note,
+.actions,
+.message {
+  color: var(--sub);
+}
+
+.note {
+  font-size: 0.82rem;
+}
+
+.message {
+  color: var(--main);
+}
+
+.you {
+  max-width: 34rem;
+}
+
+.row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+input[type="text"],
+input:not([type]),
+input.key {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: 0.92rem var(--mono);
+}
+
+input.key {
+  color: var(--sub);
+  font-size: 0.78rem;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--main-big);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--main);
+  font: 0.86rem var(--ui);
+  cursor: pointer;
+  transition: background 160ms var(--ease);
+}
+
+button:hover {
+  background: var(--wash);
+}
+
+button.quiet {
+  border-color: var(--border);
+  color: var(--sub);
+}
+
+.settings fieldset {
+  margin: 0 0 2rem;
+  padding: 0;
+  border: 0;
+}
+
+.settings legend {
+  margin-bottom: 0.8rem;
+  color: var(--sub);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.settings label {
+  margin-right: 1.4rem;
+  font-size: 0.92rem;
+}
+
+.languages {
+  columns: 4 12rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.86rem;
+  line-height: 1.9;
+}
+
+.languages a {
+  color: var(--sub);
+}
+
+.languages a.on {
+  color: var(--main);
+}
+
+@media (max-width: 640px) {
+  .top {
+    flex-wrap: wrap;
+  }
+  .top nav {
+    width: 100%;
+    margin-left: 0;
+  }
+  .result {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0s !important;
+    animation: none !important;
+  }
+}

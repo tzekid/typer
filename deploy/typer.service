@@ -1,0 +1,41 @@
+[Unit]
+Description=typer typing test
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/typer
+ExecStartPre=%h/.local/opt/typer/current/bin/typer doctor %h/.local/share/typer
+ExecStart=%h/.local/opt/typer/current/bin/typer serve %h/.local/share/typer --listen 127.0.0.1:9334 --packs %h/.local/opt/typer/current/packs --origin https://typer.plosca.ru
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=12s
+KillSignal=SIGTERM
+UMask=0077
+
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/typer
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryHigh=64M
+MemoryMax=128M
+TasksMax=16
+LimitNOFILE=16384
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target
