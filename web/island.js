@@ -492,6 +492,16 @@
   // ------ input, bound to each mounted page's elements
 
   function listen({ input, stage, after }) {
+    // Keys an input method takes part in: a dead key's follow-up (macOS
+    // US International: ' then space gives a lone '), IME composition.
+    // Their text arrives through composition events, never the fast path.
+    // Safari ends the composition before sending the keydown of the key
+    // that ended it, so a keydown in the same instant as a compositionend
+    // belongs to it as well.
+    let composing = false;
+    let composedAt = -Infinity;
+    const imeKey = (e) => composing || e.isComposing || e.keyCode === 229 || e.timeStamp - composedAt < 30;
+
     input.addEventListener("keydown", (e) => {
       if (ex === null) return;
       if (e.key === "Escape" && ex.mt_phase() === FINISHED) {
@@ -510,7 +520,8 @@
       }
       ex.mt_key_down(e.timeStamp, codeOf(e), e.repeat ? 1 : 0);
       typed();
-      if (!e.isComposing && !e.metaKey && !(e.ctrlKey && !e.altKey)) {
+      const ime = imeKey(e);
+      if (!ime && !e.metaKey && !(e.ctrlKey && !e.altKey)) {
         // Physical keyboards: handle the key here and skip the textarea's
         // editing pipeline. IME, dead keys and mobile keyboards ("Process",
         // "Dead", "Unidentified") still go through beforeinput below.
@@ -528,7 +539,7 @@
           kick();
           return;
         }
-      } else if (e.key === "Backspace" && e.ctrlKey && !e.isComposing) {
+      } else if (e.key === "Backspace" && e.ctrlKey && !ime) {
         e.preventDefault();
         deleteBackward(e.timeStamp, 1);
         kick();
@@ -590,7 +601,13 @@
       kick();
     });
 
+    input.addEventListener("compositionstart", () => {
+      composing = true;
+    });
+
     input.addEventListener("compositionend", (e) => {
+      composing = false;
+      composedAt = e.timeStamp;
       for (const ch of e.data || "") {
         const cp = ch.codePointAt(0);
         if (ex.mt_before_insert(cp)) ex.mt_insert(e.timeStamp, cp);
