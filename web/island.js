@@ -599,16 +599,19 @@
       kick();
     });
 
-    stage.addEventListener("pointerdown", (e) => {
-      if (!e.target.closest("button, a")) input.focus();
+    // Touch keyboards open only from a tap's own events; the mouse is
+    // handled in the document mousedown listener below.
+    stage.addEventListener("click", () => {
+      if (el?.input === input && el.result.hidden) input.focus();
     });
 
-    // Out of focus for a moment (not just passing to a link): say so.
+    // Focus really went elsewhere in the page (not to another app or tab,
+    // which give it back on return): say so.
     let away = 0;
     input.addEventListener("blur", () => {
       clearTimeout(away);
       away = setTimeout(() => {
-        if (el?.input === input && document.activeElement !== input && el.result.hidden) stage.classList.add("unfocused");
+        if (el?.input === input && document.hasFocus() && document.activeElement !== input && el.result.hidden) stage.classList.add("unfocused");
       }, 500);
     });
     input.addEventListener("focus", () => {
@@ -627,6 +630,17 @@
     const remaining = len === 0 ? -1 : word ? 0 : len - 1;
     ex.mt_delete(ms, word, remaining);
   }
+
+  // While a test is up, the mouse never takes focus from it: a press on the
+  // page background, the text or the setup bar would otherwise blur the
+  // input (links and buttons still get their clicks). On the result, the
+  // page behaves normally, so its text can be selected.
+  document.addEventListener("mousedown", (e) => {
+    if (el === null || e.button !== 0 || !el.result.hidden) return;
+    if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+    e.preventDefault();
+    if (document.activeElement !== el.input) el.input.focus();
+  });
 
   // Typing anywhere focuses the test; on the result Tab deals the next test
   // and Escape repeats this one, wherever the focus is.
