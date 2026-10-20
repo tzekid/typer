@@ -27,6 +27,7 @@ upstream() {
 
 pack() {
   [[ -d "$STATIC/languages" ]] || upstream
+  mkdir -p build
   odin build tools/pack -out:build/pack -o:speed "${VET[@]}"
   ./build/pack "$STATIC" build/packs
 }
