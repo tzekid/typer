@@ -13,10 +13,11 @@ Live at <https://typer.plosca.ru>.
   - quote: short, medium, long, thicc, or all.
 - **Content:** punctuation and numbers options; 444 word lists and 15,828
   quotes, all taken from Monkeytype.
-- **Tab:** once a test has begun, Tab starts it again with the same text;
-  before the first key and on the result, Tab deals new text. A quote may be
-  retried and still count. Other tests, as on Monkeytype, don't count once
-  their words were seen.
+- **Tab and Escape:** once a test has begun, Tab starts it again with the
+  same text; before the first key and on the result, Tab deals new text. On
+  the result, Escape repeats the test just done. A quote may be retried and
+  still count. Other tests, as on Monkeytype, don't count once their words
+  were seen.
 - **Quotes:** each browser gets its own shuffled queue, and no quote repeats
   until the pool runs out. Line breaks show as ↵ and are typed with Enter.
   When a quote contains tabs, Tab types them and Shift+Tab restarts.

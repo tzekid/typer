@@ -9,7 +9,6 @@
   "use strict";
 
   const root = document.documentElement;
-  const still = matchMedia("(prefers-reduced-motion: reduce)");
 
   // ------ theme: a cookie, so the server renders the right one next time
 
@@ -121,7 +120,6 @@
   function swap(doc, y) {
     const before = document.querySelector("main");
     const main = doc.querySelector("main");
-    const same = before.dataset.page === main.dataset.page;
     // DOMParser parses as if script were off: drop what is only for that.
     for (const n of main.querySelectorAll("noscript")) n.remove();
     window.typer?.unmount();
@@ -130,18 +128,6 @@
     document.title = doc.title;
     scrollTo(0, y);
     if (!window.typer?.mount(main)) main.focus({ preventScroll: true });
-    // A new page fades in whole; within the same page the setup bar stays.
-    enter(same ? [...main.children].filter((x) => x.tagName !== "NAV" && x.tagName !== "SCRIPT") : [main]);
-  }
-
-  function enter(elements) {
-    if (still.matches) return;
-    for (const x of elements) {
-      x.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], {
-        duration: 200,
-        easing: "cubic-bezier(.2, .7, .3, 1)",
-      });
-    }
   }
 
   // Error responses are plain text (bad input, rate limit): show them in place.

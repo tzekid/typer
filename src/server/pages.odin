@@ -228,7 +228,7 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	w(b, `<div class="lines-clip"><div id="lines" class="lines"><canvas id="words"></canvas><div id="caret" class="caret idle" aria-hidden="true"></div></div></div>`)
 	w(b, `<textarea id="typer-input" class="typer-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="typing input"></textarea>`)
 	w(b, `<div id="result" hidden></div><div id="after" class="after" hidden><button type="button" data-next>next test <kbd>tab</kbd></button>`)
-	w(b, `<button type="button" class="quiet" data-repeat>repeat</button><a data-result-link hidden>saved result</a></div>`)
+	w(b, `<button type="button" class="quiet" data-repeat>repeat <kbd>esc</kbd></button><a data-result-link hidden>saved result</a></div>`)
 	w(b, `<p id="words-text" class="sr-only" aria-live="polite"></p></section>`)
 	w(b, `<p id="hint" class="hint"><kbd>tab</kbd> restart · twice for `)
 	w(b, "a new quote" if s.mode == .Quote else "new words")

@@ -11,6 +11,7 @@
   const QUOTE = 2;
   const ACTIVE = 1;
   const FINISHING = 2;
+  const FINISHED = 3;
   const WASM = document.currentScript.dataset.wasm;
 
   const decoder = new TextDecoder();
@@ -493,6 +494,11 @@
   function listen({ input, stage, after }) {
     input.addEventListener("keydown", (e) => {
       if (ex === null) return;
+      if (e.key === "Escape" && ex.mt_phase() === FINISHED) {
+        e.preventDefault();
+        restart(true);
+        return;
+      }
       // Tab restarts, unless the quote itself has tabs: then shift + tab does.
       if (e.key === "Tab" && (!tabs || e.shiftKey)) {
         e.preventDefault();
@@ -609,12 +615,18 @@
     ex.mt_delete(ms, word, remaining);
   }
 
-  // Typing anywhere focuses the test; Tab restarts from the result screen too.
+  // Typing anywhere focuses the test; on the result Tab deals the next test
+  // and Escape repeats this one, wherever the focus is.
   document.addEventListener("keydown", (e) => {
     if (el === null || ex === null || document.activeElement === el.input) return;
     if (e.key === "Tab") {
       e.preventDefault();
       onTab();
+      return;
+    }
+    if (e.key === "Escape" && ex.mt_phase() === FINISHED) {
+      e.preventDefault();
+      restart(true);
       return;
     }
     if (e.target.closest("input, textarea, select, dialog")) return;
