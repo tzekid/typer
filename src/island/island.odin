@@ -99,6 +99,9 @@ State :: struct {
 	text_gen:      u32,
 	texts_at:      uintptr,
 	timer_value:   i64,
+	timer_text:    [32]u8,
+	timer_len:     int,
+	timer_changed: bool,
 	caret:         [2]f32,
 
 	cmds:          [dynamic]Cmd,
@@ -265,7 +268,8 @@ mt_phase :: proc "c" () -> u32 {
 	return u32(s.test.phase)
 }
 
-// (Re)start a test. flags: bit 0 punctuation, bit 1 numbers.
+// (Re)start a test. flags: bit 0 punctuation, bit 1 numbers, bit 2 the same
+// words again (seed and quote as last time).
 @(export)
 mt_start :: proc "c" (mode, mode2: i32, flags: u32, seed_lo, seed_hi: u32) {
 	context = ctx()
@@ -278,6 +282,7 @@ mt_start :: proc "c" (mode, mode2: i32, flags: u32, seed_lo, seed_hi: u32) {
 	}
 	if flags & 1 != 0 do s.setup.flags += {.Punctuation}
 	if flags & 2 != 0 do s.setup.flags += {.Numbers}
+	if flags & 4 != 0 do s.setup.flags += {.Repeated}
 	cfg := engine.Config {
 		mode        = s.setup.mode,
 		mode2       = mode2,
@@ -292,6 +297,7 @@ mt_start :: proc "c" (mode, mode2: i32, flags: u32, seed_lo, seed_hi: u32) {
 	clear(&s.prefix)
 	clear(&s.words)
 	s.top_line = 0
+	s.timer_value = -2 // forces the timer text to be cleared
 	s.reported = false
 	s.full_redraw = true
 	clear(&s.dirty)
@@ -747,9 +753,8 @@ mt_frame :: proc "c" (now: f64) -> u32 {
 	texts := u32(uintptr(raw_data(s.texts)))
 	if s.full_redraw {
 		push(Cmd{op = .Clear, color = .Bg})
-		s.timer_value = -1
 		for &w, i in s.words {
-			if w.line < s.top_line {
+			if w.line < s.top_line - 1 {
 				continue
 			}
 			if w.line >= s.top_line + LINES_VISIBLE {
@@ -782,8 +787,10 @@ mt_frame :: proc "c" (now: f64) -> u32 {
 }
 
 @(private)
+// Row 0 holds the line above the visible ones: island.js clips it away, and
+// it is what slides out of view when the text scrolls up a line.
 line_top :: proc(line: i32) -> f32 {
-	return s.line_h + f32(line - s.top_line) * s.line_h
+	return f32(line - s.top_line + 1) * s.line_h
 }
 
 @(private)
@@ -803,20 +810,50 @@ draw_timer :: proc(now: f64) {
 		return
 	}
 	s.timer_value = value
-	push(Cmd{op = .Rect, color = .Bg, x = 0, y = 0, a = s.width, b = s.line_h})
-	if value < 0 {
-		return
-	}
-	b := strings.builder_make(context.temp_allocator)
-	if s.setup.mode == .Time {
+	s.timer_changed = true
+	b := strings.builder_from_bytes(s.timer_text[:])
+	if value >= 0 && s.setup.mode == .Time {
 		strings.write_i64(&b, value)
-	} else {
+	} else if value >= 0 {
 		strings.write_int(&b, int(s.test.active))
 		strings.write_byte(&b, '/')
 		strings.write_int(&b, int(engine.word_count(&s.test)))
 	}
-	ptr, n := scratch_put_string(strings.to_string(b))
-	text_cmd(.Main, 0, s.line_h / 2, ptr, n)
+	s.timer_len = strings.builder_len(b)
+}
+
+// The timer is page text, not canvas: island.js sets it when it changed.
+@(export)
+mt_timer_changed :: proc "c" () -> b32 {
+	changed := s.timer_changed
+	s.timer_changed = false
+	return b32(changed)
+}
+
+@(export)
+mt_timer_ptr :: proc "c" () -> [^]u8 {
+	return raw_data(s.timer_text[:])
+}
+
+@(export)
+mt_timer_len :: proc "c" () -> u32 {
+	return u32(s.timer_len)
+}
+
+@(export)
+mt_top_line :: proc "c" () -> i32 {
+	return s.top_line
+}
+
+// Line of the active word, so island.js can tell a move along a line from a
+// jump to another one.
+@(export)
+mt_caret_line :: proc "c" () -> i32 {
+	a := int(s.test.active)
+	if a >= len(s.words) {
+		return -1
+	}
+	return s.words[a].line
 }
 
 @(private)

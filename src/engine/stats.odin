@@ -29,6 +29,7 @@ Result :: struct {
 	key_consistency:    f64,
 	key_overlap:        f64,
 	chart_wpm:          []f64,
+	chart_raw:          []f64,
 	chart_burst:        []f64,
 	chart_err:          []f64,
 	key_spacing:        []f64,
@@ -596,6 +597,7 @@ build_result :: proc(t: ^Test, allocator := context.allocator) -> Result {
 	res.wpm_consistency = 0 if is_nan(wc) else wc
 
 	res.chart_wpm = wpm_hist
+	res.chart_raw = history(t, boundaries, .Raw, allocator)
 	res.chart_burst = burst
 	res.chart_err = error_count_history(t, boundaries, allocator)
 	res.key_spacing = spacing

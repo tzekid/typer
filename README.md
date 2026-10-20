@@ -13,19 +13,27 @@ Live at <https://typer.plosca.ru>.
   - quote: short, medium, long, thicc, or all.
 - **Content:** punctuation and numbers options; 444 word lists and 15,828
   quotes, all taken from Monkeytype.
+- **Tab:** once a test has begun, Tab starts it again with the same text;
+  before the first key and on the result, Tab deals new text. A quote may be
+  retried and still count. Other tests, as on Monkeytype, don't count once
+  their words were seen.
 - **Quotes:** each browser gets its own shuffled queue, and no quote repeats
   until the pool runs out. Line breaks show as ↵ and are typed with Enter.
   When a quote contains tabs, Tab types them and Shift+Tab restarts.
 - **Stats:** the same as Monkeytype's (wpm, raw, accuracy, consistency,
   character counts, the speed chart), and the same rules decide whether a
-  result counts.
+  result counts. Hovering the chart reads out each second (wpm, raw, burst,
+  errors); its legend hides series, remembered per browser. Hovering a stat
+  shows its exact value.
 - **Typists:** your first finished test gives your browser a typist with a
   generated name. You can rename it on `/me`. The key link shown there moves
   the same typist to another device.
 - **Leaderboard:** each typist's best valid result, per mode and language.
 - **History:** your own results and personal bests.
-- **Settings:** smooth caret off, fast, medium (default) or slow; light or
-  dark theme (or follow the system), switched with the `<{ ◐ }>` button.
+- **Settings** (saved as you change them): smooth motion off, fast, medium
+  (default) or slow; light or dark theme (or follow the system), also
+  switched with the `<{ ◐ }>` button. With motion on, the caret glides along
+  a line and breathes when idle, and finished lines glide up out of view.
 
 ## How it works
 
@@ -40,8 +48,12 @@ Live at <https://typer.plosca.ru>.
   lays out the text and draws it on a canvas, so a keystroke repaints only
   the words that changed and the page never re-runs layout. The caret is a
   DOM element moved with a CSS transform, so its glide runs on the
-  compositor. `web/island.js` is the glue: it forwards input events, runs the
-  draw commands and handles the outbox.
+  compositor, as does the line scroll. `web/island.js` is the glue: it
+  forwards input events, runs the draw commands and handles the outbox.
+- **Pages** are plain server-rendered HTML that work without script. With
+  it, `web/app.js` turns link clicks and form posts into fetches that swap
+  in the new page's header and content, so nothing reloads. The fetch starts
+  on pointer-down, and the wasm instance stays alive across pages.
 - **Server** (`src/server`, native) is a single `core:nbio` event loop
   (io_uring on Linux, kqueue on macOS) on top of SQLite. It serves:
   - server-rendered pages;

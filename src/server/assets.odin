@@ -20,7 +20,7 @@ Asset :: struct {
 
 assets := [?]Asset {
 	{name = "island.js", type = "text/javascript; charset=utf-8", raw = #load("../../build/web/island.js"), br = #load("../../build/web/island.js.br"), gz = #load("../../build/web/island.js.gz")},
-	{name = "theme.js", type = "text/javascript; charset=utf-8", raw = #load("../../build/web/theme.js"), br = #load("../../build/web/theme.js.br"), gz = #load("../../build/web/theme.js.gz")},
+	{name = "app.js", type = "text/javascript; charset=utf-8", raw = #load("../../build/web/app.js"), br = #load("../../build/web/app.js.br"), gz = #load("../../build/web/app.js.gz")},
 	{name = "app.css", type = "text/css; charset=utf-8", raw = #load("../../build/web/app.css"), br = #load("../../build/web/app.css.br"), gz = #load("../../build/web/app.css.gz")},
 	{name = "core.wasm", type = "application/wasm", raw = #load("../../build/web/core.wasm"), br = #load("../../build/web/core.wasm.br"), gz = #load("../../build/web/core.wasm.gz")},
 	{name = "DMMono-latin.woff2", type = "font/woff2", raw = #load("../../web/fonts/DMMono-latin.woff2")},

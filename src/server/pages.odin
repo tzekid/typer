@@ -6,9 +6,9 @@ import "core:time"
 import engine "../engine"
 
 // Server-rendered pages. Everything except the typing surface works as plain
-// HTML; the test page carries its setup as JSON for the island.
-
-FONT_PX :: 28
+// HTML; the test page carries its setup as JSON for the island. With script,
+// app.js swaps <header> and <main> in place instead of loading a new page,
+// so `kind` (on <main>) tells it which page it is looking at.
 
 Caret :: enum {
 	Off,
@@ -58,7 +58,7 @@ Page :: struct {
 w :: strings.write_string
 
 @(private)
-page_start :: proc(b: ^strings.Builder, p: Page, title: string, current: string, preload: []string = nil) {
+page_start :: proc(b: ^strings.Builder, p: Page, title: string, kind: string, preload: []string = nil) {
 	w(b, `<!doctype html><html lang="en"`)
 	if p.theme != "" {
 		w(b, ` data-theme="`)
@@ -80,26 +80,32 @@ page_start :: proc(b: ^strings.Builder, p: Page, title: string, current: string,
 	w(b, `<link rel="stylesheet" href="`)
 	w(b, asset_url("app.css"))
 	w(b, `"><script src="`)
-	w(b, asset_url("theme.js"))
+	w(b, asset_url("app.js"))
+	w(b, `" defer></script><script src="`)
+	w(b, asset_url("island.js"))
+	w(b, `" data-wasm="`)
+	w(b, asset_url("core.wasm"))
 	w(b, `" defer></script></head><body><header class="top"><a class="mark" href="/">&lt;{ typer }&gt;</a>`)
 	w(b, `<form class="theme" method="post" action="/theme"><button type="submit" data-theme-toggle aria-label="Switch between light and dark">&lt;{ <span class="glyph"></span> }&gt;</button></form><nav>`)
 	for item in ([?][2]string{{"/", "test"}, {"/leaderboard", "leaderboard"}, {"/history", "history"}, {"/settings", "settings"}}) {
 		w(b, `<a href="`)
 		w(b, item[0])
 		w(b, `"`)
-		if item[1] == current do w(b, ` aria-current="page"`)
+		if item[1] == kind do w(b, ` aria-current="page"`)
 		w(b, `>`)
 		w(b, item[1])
 		w(b, `</a>`)
 	}
 	if p.known {
 		w(b, `<a class="me" href="/me"`)
-		if current == "me" do w(b, ` aria-current="page"`)
+		if kind == "me" do w(b, ` aria-current="page"`)
 		w(b, `>`)
 		engine.html_text(b, p.user.name)
 		w(b, `</a>`)
 	}
-	w(b, `</nav></header><main>`)
+	w(b, `</nav></header><main tabindex="-1" data-page="`)
+	w(b, kind)
+	w(b, `">`)
 }
 
 @(private)
@@ -218,10 +224,15 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	engine.html_text(b, engine.quote_language(s.language) if s.mode == .Quote else s.language)
 	w(b, `</a></nav>`)
 
-	w(b, `<section id="stage" class="stage"><canvas id="words"></canvas><div id="caret" class="caret idle" aria-hidden="true"></div>`)
+	w(b, `<section id="stage" class="stage"><div id="timer" class="timer" aria-hidden="true"></div>`)
+	w(b, `<div class="lines-clip"><div id="lines" class="lines"><canvas id="words"></canvas><div id="caret" class="caret idle" aria-hidden="true"></div></div></div>`)
 	w(b, `<textarea id="typer-input" class="typer-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="typing input"></textarea>`)
-	w(b, `<div id="result" hidden></div><p id="words-text" class="sr-only" aria-live="polite"></p></section>`)
-	w(b, `<p class="hint"><kbd>tab</kbd> restart</p>`)
+	w(b, `<div id="result" hidden></div><div id="after" class="after" hidden><button type="button" data-next>next test <kbd>tab</kbd></button>`)
+	w(b, `<button type="button" class="quiet" data-repeat>repeat</button><a data-result-link hidden>saved result</a></div>`)
+	w(b, `<p id="words-text" class="sr-only" aria-live="polite"></p></section>`)
+	w(b, `<p id="hint" class="hint"><kbd>tab</kbd> restart · twice for `)
+	w(b, "a new quote" if s.mode == .Quote else "new words")
+	w(b, `</p>`)
 
 	w(b, `<script id="typer-config" type="application/json">{"mode":`)
 	strings.write_int(b, int(s.mode))
@@ -235,11 +246,7 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	engine.json_string(b, s.language)
 	w(b, `,"pack":`)
 	engine.json_string(b, strings.concatenate({"/packs/", s.language, ".bin"}, context.temp_allocator))
-	w(b, `,"wasm":`)
-	engine.json_string(b, asset_url("core.wasm"))
-	w(b, `,"fontPx":`)
-	strings.write_int(b, FONT_PX)
-	w(b, `,"fontFamily":"\"DM Mono\", ui-monospace, monospace","caretMs":`)
+	w(b, `,"caretMs":`)
 	strings.write_int(b, CARET_MS[p.caret])
 	if s.mode == .Quote {
 		w(b, `,"quoteGroups":`)
@@ -253,14 +260,12 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 		w(b, `},"quotes":`)
 		write_quotes_json(b, t.quotes)
 	}
-	w(b, `}</script><script src="`)
-	w(b, asset_url("island.js"))
-	w(b, `" defer></script>`)
+	w(b, `}</script>`)
 	page_end(b)
 }
 
 render_result_page :: proc(b: ^strings.Builder, p: Page, v: engine.Result_View, attempts: []Stored) {
-	page_start(b, p, "typer result", "")
+	page_start(b, p, "typer result", "result")
 	engine.render_result(b, v)
 	if len(attempts) > 1 {
 		w(b, `<h2>`)
@@ -458,7 +463,7 @@ render_me_page :: proc(b: ^strings.Builder, p: Page, token: string, message: str
 
 render_settings_page :: proc(b: ^strings.Builder, p: Page) {
 	page_start(b, p, "typer settings", "settings")
-	w(b, `<form class="settings" method="post" action="/settings"><fieldset><legend>smooth caret</legend>`)
+	w(b, `<form class="settings" method="post" action="/settings" data-autosave><fieldset><legend>smooth motion</legend>`)
 	for c in Caret {
 		w(b, `<label><input type="radio" name="caret" value="`)
 		w(b, CARET_NAMES[c])
@@ -468,7 +473,7 @@ render_settings_page :: proc(b: ^strings.Builder, p: Page) {
 		w(b, CARET_NAMES[c])
 		w(b, `</label>`)
 	}
-	w(b, `<p class="note">Off draws the caret in the same frame as the letter; the smooth ones glide to it.</p></fieldset><fieldset><legend>theme</legend>`)
+	w(b, `<p class="note">How the caret and the lines glide. Off moves them in the same frame as the letter.</p></fieldset><fieldset><legend>theme</legend>`)
 	for t in ([?][2]string{{"", "system"}, {"light", "light"}, {"dark", "dark"}}) {
 		w(b, `<label><input type="radio" name="theme" value="`)
 		w(b, t[0] if t[0] != "" else "system")
@@ -478,12 +483,12 @@ render_settings_page :: proc(b: ^strings.Builder, p: Page) {
 		w(b, t[1])
 		w(b, `</label>`)
 	}
-	w(b, `</fieldset><button>save</button></form>`)
+	w(b, `</fieldset><noscript><button>save</button></noscript><p class="message" data-saved hidden>saved</p></form>`)
 	page_end(b)
 }
 
 render_languages_page :: proc(b: ^strings.Builder, p: Page, s: Test_Setup, board: bool, languages: []string) {
-	page_start(b, p, "typer languages", "")
+	page_start(b, p, "typer languages", "languages")
 	w(b, `<h2>`)
 	w(b, "quote languages" if s.mode == .Quote else "languages")
 	w(b, `</h2><ul class="languages">`)

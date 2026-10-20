@@ -660,7 +660,7 @@ save_settings :: proc(req: ^Request, res: ^Response) {
 	redirect(res, "/settings")
 }
 
-// The no-script theme switch; theme.js flips it in place instead.
+// The no-script theme switch; app.js flips it in place instead.
 @(private)
 toggle_theme :: proc(req: ^Request, res: ^Response) {
 	next := "dark"

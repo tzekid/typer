@@ -36,6 +36,7 @@ Raw_Event :: struct {
 Record_Flag :: enum u8 {
 	Punctuation,
 	Numbers,
+	Repeated, // the same words again after a restart
 }
 Record_Flags :: bit_set[Record_Flag;u8]
 

@@ -214,6 +214,36 @@ main {
   padding: 0 1.25rem 4rem;
 }
 
+main:focus {
+  outline: none;
+}
+
+/* A page that takes a moment to arrive: a thin bar along the top. */
+html.loading::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 10;
+  height: 2px;
+  background: var(--main-big);
+  transform-origin: left;
+  animation: loading 1.1s var(--ease) infinite;
+}
+
+@keyframes loading {
+  from {
+    transform: scaleX(0);
+  }
+  70% {
+    transform: scaleX(0.85);
+    opacity: 1;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+
 /* ------ mode bar */
 
 .modes {
@@ -269,12 +299,45 @@ main {
   min-height: 180px;
 }
 
+/* Page text above the lines, so it never moves with them. */
+.timer {
+  height: 45px;
+  color: var(--main);
+  font: 28px/45px var(--mono);
+  contain: strict;
+  transition: opacity 200ms var(--ease);
+}
+
+.timer:empty {
+  opacity: 0;
+}
+
+/* Three lines show. The row above them, where a finished line slides away
+   when the text scrolls, is clipped, and the edges fade so glyphs passing
+   them soften instead of being cut. */
+.lines-clip {
+  position: relative;
+  height: 135px;
+  overflow: hidden;
+  mask-image: linear-gradient(transparent, #000 7px, #000 calc(100% - 7px), transparent);
+}
+
+.lines {
+  position: absolute;
+  top: -45px;
+  right: 0;
+  left: 0;
+  will-change: transform;
+}
+
 #words {
   display: block;
   cursor: text;
 }
 
-/* Moved with transform only, so the compositor animates it. */
+/* Moved with transform only, so the compositor animates it. The glide is a
+   gentle ease in and out (Monkeytype's), which keeps an even pace when keys
+   come faster than it finishes. */
 .caret {
   position: absolute;
   top: 0;
@@ -284,16 +347,21 @@ main {
   background: var(--caret);
   clip-path: inset(19% 0);
   transition-property: transform;
-  transition-timing-function: cubic-bezier(0.25, 0.8, 0.4, 1);
-  will-change: transform;
+  transition-timing-function: cubic-bezier(0.3, 0.1, 0.7, 0.9);
+  will-change: transform, opacity;
   pointer-events: none;
 }
 
+/* Breathes rather than blinks: a soft fade out and back, from fully on. */
 .caret.idle {
-  animation: blink 1s step-end infinite;
+  animation: blink 1.1s ease-in-out infinite;
 }
 
 @keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
   50% {
     opacity: 0;
   }
@@ -328,6 +396,56 @@ kbd {
 }
 
 /* ------ result */
+
+.after {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem 1rem;
+  margin-top: 2.6rem;
+}
+
+.after kbd {
+  margin-left: 0.45rem;
+}
+
+.after [data-result-link] {
+  color: var(--sub);
+  font-size: 0.82rem;
+}
+
+/* Exact values on hover, instantly and in the page's own style. */
+[data-tip] {
+  position: relative;
+  cursor: default;
+}
+
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 3;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg);
+  font: 0.74rem/1.3 var(--ui);
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 140ms var(--ease), transform 140ms var(--ease);
+}
+
+[data-tip]:hover::after {
+  opacity: 1;
+  transform: none;
+  transition-delay: 60ms;
+}
 
 .result {
   display: grid;
@@ -398,7 +516,14 @@ kbd {
   font-size: 0.8rem;
 }
 
+.chart-box {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+}
+
 .chart {
+  display: block;
   width: 100%;
   height: auto;
   overflow: visible;
@@ -410,21 +535,27 @@ kbd {
   stroke-linecap: round;
 }
 
-.chart .wpm {
+.chart polyline.wpm {
   stroke: var(--main-big);
   stroke-width: 2.5;
 }
 
-.chart .area {
-  fill: var(--main-big);
-  opacity: 0.08;
-  stroke: none;
+.chart polyline.raw {
+  stroke: var(--main-big);
+  stroke-opacity: 0.5;
+  stroke-width: 1.75;
+  stroke-dasharray: 6 6;
 }
 
-.chart .burst {
+.chart polyline.burst {
   stroke: var(--sub);
-  stroke-width: 1.75;
-  stroke-dasharray: 5 6;
+  stroke-opacity: 0.8;
+  stroke-width: 1.5;
+}
+
+.chart .burst-area {
+  fill: var(--sub);
+  opacity: 0.07;
 }
 
 .chart .err {
@@ -441,6 +572,163 @@ kbd {
 .chart .axis {
   fill: var(--sub);
   font: 11px var(--ui);
+}
+
+.chart .err-axis {
+  fill: var(--error);
+}
+
+[data-chart-hidden~="err"] .chart .err-axis {
+  display: none;
+}
+
+/* hover readout: a guide, a dot per line and the values beside them */
+.chart .hover {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms var(--ease);
+}
+
+.chart .guide {
+  stroke: var(--sub);
+  stroke-opacity: 0.45;
+}
+
+.chart .dot {
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+
+.chart .dot.wpm,
+.chart .dot.raw {
+  fill: var(--main-big);
+}
+
+.chart .dot.burst {
+  fill: var(--sub);
+}
+
+.chart-box .tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  gap: 0.2rem;
+  min-width: 8rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  color: var(--text);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), transform 70ms linear;
+}
+
+.chart-box.hovering .hover,
+.chart-box.hovering .tip {
+  opacity: 1;
+}
+
+.tip b {
+  color: var(--sub);
+  font-size: 0.68rem;
+  font-weight: normal;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.tip span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tip em {
+  margin-left: auto;
+  padding-left: 1rem;
+  font: 0.8rem var(--mono);
+  font-style: normal;
+}
+
+/* series toggles, shown while the chart is hovered */
+.chart-box .legend {
+  position: absolute;
+  right: 0;
+  bottom: -1.7rem;
+  display: flex;
+  gap: 0.15rem;
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
+}
+
+.chart-box:hover .legend,
+.chart-box:focus-within .legend {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chart-box .legend {
+    opacity: 1;
+  }
+}
+
+.legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.55rem;
+  border: 0;
+  color: var(--sub);
+  font-size: 0.72rem;
+}
+
+.legend button:hover {
+  color: var(--text);
+}
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.swatch.wpm {
+  background: var(--main-big);
+}
+
+.swatch.raw {
+  background: repeating-linear-gradient(90deg, var(--main-big) 0 4px, transparent 4px 7px);
+  opacity: 0.7;
+}
+
+.swatch.burst {
+  background: var(--sub);
+}
+
+.swatch.err {
+  width: 8px;
+  height: 8px;
+  background: linear-gradient(45deg, transparent 40%, var(--error) 40% 60%, transparent 60%),
+    linear-gradient(-45deg, transparent 40%, var(--error) 40% 60%, transparent 60%);
+}
+
+[data-chart-hidden~="raw"] .chart .raw,
+[data-chart-hidden~="burst"] .chart .burst,
+[data-chart-hidden~="burst"] .chart .burst-area,
+[data-chart-hidden~="err"] .chart .err {
+  display: none;
+}
+
+[data-chart-hidden~="raw"] .legend [data-series="raw"],
+[data-chart-hidden~="burst"] .legend [data-series="burst"],
+[data-chart-hidden~="err"] .legend [data-series="err"] {
+  opacity: 0.45;
+  text-decoration: line-through;
 }
 
 /* ------ tables and pages */
@@ -520,6 +808,10 @@ td a {
 
 .message {
   color: var(--main);
+}
+
+.message.problem {
+  color: var(--error);
 }
 
 .you {

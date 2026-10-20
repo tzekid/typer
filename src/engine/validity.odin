@@ -26,6 +26,10 @@ invalid_reason :: proc(t: ^Test, setup: Setup, r: Result) -> string {
 			return "test invalid: afk detected"
 		}
 	}
+	// Quotes may be retried; other tests can't count once their words were seen.
+	if .Repeated in setup.flags && setup.mode != .Quote {
+		return "test invalid: repeated"
+	}
 	words10 := setup.mode == .Words && m2 == 10
 	limit := 420.0 if words10 else 350.0
 	if r.wpm < 0 || r.wpm > limit {

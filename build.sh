@@ -41,14 +41,14 @@ web() {
   [[ -f build/packs/lang/english.bin ]] || pack
   mkdir -p build/web
   odin build src/island -target:freestanding_wasm32 -no-entry-point -o:size -source-code-locations:obfuscated "${VET[@]}" -out:build/web/core.wasm
-  cp web/island.js web/theme.js build/web/
+  cp web/island.js web/app.js build/web/
   css="$(cat web/app.css)"
   for font in web/fonts/*.woff2; do
     name="$(basename "$font")"
     css="${css//FONT:$name//assets/${name%%.*}.$(hash10 "$font").${name#*.}}"
   done
   printf '%s\n' "$css" > build/web/app.css
-  for f in island.js theme.js app.css core.wasm; do
+  for f in island.js app.js app.css core.wasm; do
     brotli -q 11 -f -o "build/web/$f.br" "build/web/$f"
     gzip -9 -n -c "build/web/$f" > "build/web/$f.gz"
   done
