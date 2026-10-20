@@ -39,8 +39,9 @@ Cmd_Op :: enum u32 {
 	Text_Clip = 4, // text clipped to x in [a, b)
 }
 
-// Set on text ops whose bytes live in the word text pool, which stays put
-// until mt_text_gen() changes: island.js may cache the decoded string.
+// Set on text ops whose bytes live in the word text pool, whose contents at
+// an address stay the same until mt_text_gen() changes (a new test, or the
+// pool moving): island.js may cache the decoded string.
 CMD_CACHEABLE :: u32(0x80)
 
 // 32 bytes; island.js reads these through typed array views.
@@ -294,6 +295,9 @@ mt_start :: proc "c" (mode, mode2: i32, flags: u32, seed_lo, seed_hi: u32) {
 	clear(&s.raw)
 	clear(&s.texts)
 	reserve(&s.texts, 64 * 1024) // keeps word text addresses stable for island.js's cache
+	// The pool is refilled from the start with new words, so the same address
+	// now holds different text: island.js must drop what it cached.
+	s.text_gen += 1
 	clear(&s.prefix)
 	clear(&s.words)
 	s.top_line = 0
