@@ -261,6 +261,8 @@ page_for :: proc(req: ^Request) -> Page {
 	return p
 }
 
+MODE2_MAX :: 1000 // the most seconds or words a test can ask for
+
 @(private)
 setup_from_query :: proc(q: string) -> (s: Test_Setup, ok: bool) {
 	s = DEFAULT_SETUP
@@ -284,7 +286,7 @@ setup_from_query :: proc(q: string) -> (s: Test_Setup, ok: bool) {
 		}
 	} else {
 		n, nok := strconv.parse_int(query_value(q, "n"), 10)
-		if !nok || n < 1 || n > 1000 {
+		if !nok || n < 1 || n > MODE2_MAX {
 			return s, false
 		}
 		s.mode2 = i32(n)
@@ -355,7 +357,7 @@ quotes_window :: proc(req: ^Request, res: ^Response) {
 	groups, gok := strconv.parse_int(query_value(q, "q"), 10)
 	seed, sok := strconv.parse_u64(query_value(q, "seed"), 16)
 	from, fok := strconv.parse_int(query_value(q, "from"), 10)
-	if collection == nil || !gok || !sok || !fok || groups < 1 || groups > int(QUOTE_ALL) || from < 0 {
+	if collection == nil || !gok || !sok || !fok || groups < 1 || groups > int(QUOTE_ALL) || from < 0 || from > QUEUE_MAX {
 		respond_text(res, 400, "bad quote window")
 		return
 	}
@@ -395,10 +397,25 @@ replay :: proc(record: []u8) -> (r: Replayed, ok: bool) {
 	if !dok {
 		return {}, false
 	}
-	for e in events {
-		engine.test_apply(&r.test, e)
+	switch setup.mode {
+	case .Quote:
+		c := g_quotes[setup.language]
+		if c == nil {
+			return {}, false
+		}
+		q, found := engine.quote_by_id(&c.pack, u32(setup.mode2))
+		if !found || !engine.test_matches_quote(&r.test, q.text) {
+			return {}, false
+		}
+		r.quote = q
+	case .Time, .Words:
+		if !known_language(setup.language) || setup.mode2 < 1 || setup.mode2 > MODE2_MAX {
+			return {}, false
+		}
+	case .Zen, .Custom:
+		return {}, false
 	}
-	if r.test.phase != .Finished {
+	if !engine.record_replay(&r.test, events) {
 		return {}, false
 	}
 	res := engine.build_result(&r.test)
@@ -409,19 +426,8 @@ replay :: proc(record: []u8) -> (r: Replayed, ok: bool) {
 		quote_group = -1,
 	}
 	if setup.mode == .Quote {
-		c := g_quotes[setup.language]
-		if c == nil {
-			return {}, false
-		}
-		q, found := engine.quote_by_id(&c.pack, u32(setup.mode2))
-		if !found || !engine.test_matches_quote(&r.test, q.text) {
-			return {}, false
-		}
-		r.quote = q
-		r.view.quote_group = i32(q.group)
-		r.view.quote_source = q.source
-	} else if !known_language(setup.language) || (setup.mode != .Time && setup.mode != .Words) {
-		return {}, false
+		r.view.quote_group = i32(r.quote.group)
+		r.view.quote_source = r.quote.source
 	}
 	return r, true
 }
@@ -541,7 +547,7 @@ leaderboard_page :: proc(req: ^Request, res: ^Response) {
 		board.mode = .Quote
 		board.qgroup = 1
 	}
-	if n, ok := strconv.parse_int(query_value(q, "n"), 10); ok && n > 0 && n <= 1000 {
+	if n, ok := strconv.parse_int(query_value(q, "n"), 10); ok && n > 0 && n <= MODE2_MAX {
 		board.mode2 = i32(n)
 	}
 	// q is a group mask, as on the test page; a board shows one group.

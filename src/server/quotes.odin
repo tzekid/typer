@@ -130,6 +130,7 @@ write_quotes_json :: proc(b: ^strings.Builder, quotes: []engine.Quote) {
 }
 
 QUEUE_COOKIE :: "typer_queue"
+QUEUE_MAX :: 1 << 40 // far past any real queue, and far from overflowing a deal
 
 // The browser's queue position: "<seed hex>.<position>".
 parse_queue :: proc(v: string) -> (seed: u64, pos: int, ok: bool) {
@@ -139,7 +140,7 @@ parse_queue :: proc(v: string) -> (seed: u64, pos: int, ok: bool) {
 	}
 	s, sok := strconv.parse_u64(v[:dot], 16)
 	p, pok := strconv.parse_int(v[dot + 1:], 10)
-	if !sok || !pok || p < 0 {
+	if !sok || !pok || p < 0 || p > QUEUE_MAX {
 		return
 	}
 	return s, p, true

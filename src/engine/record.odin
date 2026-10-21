@@ -14,6 +14,8 @@ RECORD_MAGIC :: "TYR1"
 RECORD_VERSION :: u32(1)
 RECORD_MAX_WORDS :: 100_000
 RECORD_MAX_EVENTS :: 1_000_000
+RECORD_MAX_MS :: 1e12 // event times are page clock milliseconds
+RECORD_MAX_TEST_MS :: 3 * 60 * 60 * 1000
 
 Raw_Kind :: enum u8 {
 	Key_Down,
@@ -200,8 +202,36 @@ record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (
 		e.kind = Raw_Kind(k[0])
 		e.code = u16(k[2]) | u16(k[3]) << 8
 		e.arg = i32(read_u32(&r))
+		if !(abs(e.ms) <= RECORD_MAX_MS) || (e.kind == .Insert && !is_scalar(e.arg)) {
+			return {}, nil, false
+		}
 	}
 	return setup, events, r.ok && r.at == len(r.data)
+}
+
+// Applies a decoded record's events, refusing any insert or delete the island
+// would not have let through, and any finish outside the test's time span.
+record_replay :: proc(t: ^Test, events: []Raw_Event) -> bool {
+	for e in events {
+		#partial switch e.kind {
+		case .Insert:
+			if !test_before_insert(t, rune(e.arg)) {
+				return false
+			}
+		case .Delete_Char, .Delete_Word:
+			if !test_before_delete(t) {
+				return false
+			}
+		}
+		test_apply(t, e)
+	}
+	duration := t.end_ms - t.start_ms
+	return t.phase == .Finished && duration >= 0 && duration <= RECORD_MAX_TEST_MS
+}
+
+@(private)
+is_scalar :: proc "contextless" (c: i32) -> bool {
+	return c > 0 && c <= 0x10FFFF && (c < 0xD800 || c > 0xDFFF)
 }
 
 @(private)

@@ -1,5 +1,6 @@
 package server
 
+import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
 import "core:nbio"
@@ -14,13 +15,19 @@ import "core:time"
 // run inline on the loop; all of them take microseconds, so one core serves
 // tens of thousands of requests a second and the database, rate limiter and
 // leaderboard cache need no locks.
+//
+// Memory has a worst case that fits the service's 128 MB limit: each
+// connection keeps its 16 KB buffer and at most ARENA_KEEP between requests,
+// and all bodies in flight share BODIES_MAX.
 
 HEAD_MAX :: 16 * 1024
 BODY_MAX :: 1024 * 1024 // a 120 s test at 200 wpm records about 115 KB
 IDLE_TIMEOUT :: 15 * time.Second
 HEAD_DEADLINE :: 10 * time.Second
 BODY_DEADLINE :: 30 * time.Second
-MAX_CONNECTIONS :: 8192
+BODIES_MAX :: 16 * 1024 * 1024
+ARENA_KEEP :: 64 * 1024
+MAX_CONNECTIONS :: 512
 
 Header :: struct {
 	name, value: string,
@@ -99,6 +106,8 @@ status_text :: proc(code: int) -> string {
 		return "Request Header Fields Too Large"
 	case 500:
 		return "Internal Server Error"
+	case 503:
+		return "Service Unavailable"
 	}
 	return "Unknown"
 }
@@ -123,6 +132,7 @@ Loop :: struct {
 	listener:    net.TCP_Socket,
 	handler:     Handler,
 	connections: int,
+	bodies:      int, // bytes of request bodies being received or handled
 }
 
 // Serves forever.
@@ -182,9 +192,32 @@ on_accept :: proc(op: ^nbio.Operation, loop: ^Loop) {
 @(private)
 drop :: proc(c: ^Conn) {
 	nbio.close(c.sock)
+	release_body(c)
 	virtual.arena_destroy(&c.arena)
 	c.loop.connections -= 1
 	free(c)
+}
+
+// Bodies are allocated outside the arena so the budget can count them exactly
+// and hand their memory back as soon as the handler is done with them.
+@(private)
+release_body :: proc(c: ^Conn) {
+	if len(c.req.body) > 0 {
+		c.loop.bodies -= len(c.req.body)
+		delete(c.req.body, runtime.heap_allocator())
+	}
+	c.req.body = nil
+}
+
+// After a large request, give its memory back rather than keep it on an idle connection.
+@(private)
+shrink_arena :: proc(c: ^Conn) {
+	if c.arena.total_used > ARENA_KEEP {
+		virtual.arena_destroy(&c.arena)
+		_ = virtual.arena_init_growing(&c.arena)
+	} else {
+		virtual.arena_free_all(&c.arena)
+	}
 }
 
 @(private)
@@ -259,8 +292,16 @@ next :: proc(c: ^Conn) {
 		fail(c, 413)
 		return
 	}
+	if c.loop.bodies + length > BODIES_MAX {
+		fail(c, 503)
+		return
+	}
 	// The head is parsed into the arena, so the buffer can be reused at once.
-	body := make([]u8, length)
+	body: []u8
+	if length > 0 {
+		body = make([]u8, length, runtime.heap_allocator())
+		c.loop.bodies += length
+	}
 	got := copy(body, c.buf[head_end:c.have])
 	consumed := head_end + got
 	copy(c.buf[:], c.buf[consumed:c.have])
@@ -291,6 +332,7 @@ respond :: proc(c: ^Conn) {
 		status = 200,
 	}
 	c.loop.handler(&c.req, &c.res)
+	release_body(c)
 	c.head_out = response_head(&c.req, &c.res)
 	fmt.printfln(
 		"event=request method=%s path=%s status=%d bytes=%d micros=%.0f",
@@ -314,6 +356,7 @@ on_sent :: proc(op: ^nbio.Operation, c: ^Conn) {
 		return
 	}
 	c.started = time.tick_now()
+	shrink_arena(c)
 	next(c)
 }
 
