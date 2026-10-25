@@ -131,6 +131,10 @@ cmd_serve :: proc(args: []string) {
 	if !load_languages() || !load_quotes() {
 		os.exit(1)
 	}
+	if !history_backfill(g_db.conn) {
+		fmt.eprintfln("serve: history backfill: %s", sql_error(g_db.conn))
+		os.exit(1)
+	}
 	assets_init()
 	if !serve(ep, route) {
 		os.exit(1)
@@ -476,7 +480,7 @@ post_result :: proc(req: ^Request, res: ^Response) {
 		valid      = v.invalid == "",
 		user_id    = user.id,
 	}
-	id, created, iok := db_insert_result(&g_db, stored, req.body)
+	id, created, iok := db_insert_result(&g_db, stored, req.body, analysis_encode(analyse_test(&r.test)))
 	if !iok {
 		fmt.eprintfln("event=insert_failed error=%q", sql_error(g_db.conn))
 		respond_text(res, 500, "could not store result")
@@ -525,13 +529,14 @@ result_page :: proc(req: ^Request, res: ^Response) {
 @(private)
 history_page :: proc(req: ^Request, res: ^Response) {
 	p := page_for(req)
-	bests, recent: []Stored
+	h: ^History
+	selected := 0
 	if p.known {
-		bests = db_user_bests(&g_db, p.user.id)
-		recent = db_user_recent(&g_db, p.user.id, 100)
+		h = db_history(&g_db, p.user.id)
+		selected = history_selected(h, req.query)
 	}
 	b := strings.builder_make()
-	render_history_page(&b, p, bests, recent)
+	render_history_page(&b, p, h, selected, req.query)
 	html_response(res, &b)
 }
 

@@ -406,42 +406,6 @@ results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlig
 	w(b, `</tbody></table>`)
 }
 
-render_history_page :: proc(b: ^strings.Builder, p: Page, bests: []Stored, recent: []Stored) {
-	page_start(b, p, "history · typer", "history")
-	if !p.known {
-		w(b, `<p class="empty">Your history starts with your first finished test. It stays with this browser; the key link on your name's page brings it to another one.</p>`)
-		page_end(b)
-		return
-	}
-	w(b, `<h2>personal bests</h2>`)
-	if len(bests) == 0 {
-		w(b, `<p class="empty">No valid results yet.</p>`)
-	} else {
-		w(b, `<div class="bests">`)
-		for s in bests {
-			w(b, `<a class="best" href="/results/`)
-			strings.write_i64(b, s.id)
-			w(b, `"><span class="what">`)
-			setup_label(b, s)
-			w(b, `</span><span class="wpm">`)
-			engine.write_fixed(b, s.wpm, 0)
-			w(b, `<small>wpm</small></span><span class="more">`)
-			engine.write_fixed(b, s.acc, 0)
-			w(b, `% acc · `)
-			write_day(b, s.created_at)
-			w(b, `</span></a>`)
-		}
-		w(b, `</div>`)
-	}
-	w(b, `<h2>recent</h2>`)
-	if len(recent) == 0 {
-		w(b, `<p class="empty">Nothing typed yet.</p>`)
-	} else {
-		results_table(b, recent, false, 0, 0)
-	}
-	page_end(b)
-}
-
 BOARD_TIMES := [?]i32{15, 30, 60, 120}
 BOARD_WORDS := [?]i32{10, 25, 50, 100}
 

@@ -30,7 +30,9 @@ Live at <https://typer.plosca.ru>.
   generated name. You can rename it on `/me`. The key link shown there moves
   the same typist to another device.
 - **Leaderboard:** each typist's best valid result, per mode and language.
-- **History:** your own results and personal bests.
+- **History:** findings and progress within each setup, key accuracy and speed,
+  missed words, recurring substitutions, slow pairs, pace within a test,
+  practice time by day and every saved result.
 - **Settings** (saved as you change them): smooth motion off, fast, medium
   (default) or slow; light or dark theme (or follow the system), also
   switched with the `<{ ◐ }>` button. With motion on, the caret glides along
@@ -110,7 +112,14 @@ It:
 4. checks `/healthz` and the running executable, and rolls back to the
    previous release if either fails.
 
-Database migrations run when the server starts.
+Database migrations and replay backfill run before the server listens. Backfill
+walks result ids in order and commits batches of 100. New results save their
+analytics and per-typist setup totals in the same transaction. Missing or damaged
+totals rebuild from the per-result summaries and never reject a valid upload.
+The history page reads those totals and result metadata. Its bounded in-memory
+cache is invalidated when that typist saves a result.
+The page's "How these numbers work" disclosure defines the metrics and sample
+thresholds.
 
 First time only:
 

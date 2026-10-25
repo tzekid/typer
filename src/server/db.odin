@@ -18,6 +18,7 @@ Db :: struct {
 	generation:   u64, // bumped by every write that can change a leaderboard
 	data_version: i64, // SQLite's; it changes when another connection commits
 	boards:       map[string]Cached_Board,
+	histories:    map[i64]Cached_History,
 }
 
 @(private)
@@ -67,6 +68,30 @@ MIGRATIONS := [?]string {
 	CREATE INDEX results_board ON results (mode, mode2, qgroup, language, punctuation, numbers, valid, user_id, wpm);
 	CREATE INDEX results_by_user ON results (user_id, id);
 	`,
+	// 2: replay summaries, filled before the server listens.
+	`
+	CREATE TABLE result_analytics (
+		result_id INTEGER PRIMARY KEY REFERENCES results(id) ON DELETE CASCADE,
+		version INTEGER NOT NULL,
+		data BLOB NOT NULL
+	) STRICT;
+	CREATE INDEX analytics_unavailable ON result_analytics(result_id) WHERE version = 0;
+	CREATE TABLE history_totals (
+		user_id INTEGER NOT NULL REFERENCES users(id),
+		setup TEXT NOT NULL,
+		data BLOB NOT NULL,
+		PRIMARY KEY(user_id, setup)
+	) STRICT, WITHOUT ROWID;
+	CREATE INDEX results_history ON results(user_id, created_at, id, mode, mode2, language, punctuation, numbers, wpm, raw, acc, consistency, duration, valid, qgroup);
+	`,
+	// 3: word and substitution summaries replace the first analytics format.
+	`
+	CREATE INDEX results_analytics_order ON results(id);
+	DROP INDEX analytics_unavailable;
+	CREATE INDEX analytics_version ON result_analytics(version);
+	DELETE FROM history_totals;
+	DELETE FROM result_analytics WHERE version > 0 AND version < 2;
+	`,
 }
 
 db_open :: proc(db: ^Db, path: string) -> (err: string, ok: bool) {
@@ -94,6 +119,7 @@ db_open :: proc(db: ^Db, path: string) -> (err: string, ok: bool) {
 		}
 	}
 	db.boards = make(map[string]Cached_Board, 16, runtime.heap_allocator())
+	db.histories = make(map[i64]Cached_History, 16, runtime.heap_allocator())
 	return "", true
 }
 
@@ -198,6 +224,9 @@ db_rename_user :: proc(db: ^Db, id: i64, name: string) -> Rename_Result {
 // called `name`. Returns the new typist's token.
 db_claim :: proc(db: ^Db, name: string, created_at: i64) -> (token: string, claimed: i64, ok: bool) {
 	sync.guard(&db.lock)
+	if sql_exec(db.conn, "BEGIN IMMEDIATE") != SQLITE_DONE do return "", 0, false
+	committed := false
+	defer if !committed do sql_exec(db.conn, "ROLLBACK")
 	token = new_token()
 	if sql_exec(db.conn, "INSERT INTO users (token_sha, name, created_at) VALUES (?, ?, ?)", token_sha(token), name, created_at) != SQLITE_DONE {
 		return "", 0, false
@@ -213,7 +242,11 @@ db_claim :: proc(db: ^Db, name: string, created_at: i64) -> (token: string, clai
 		}
 		finalize(st)
 	}
+	if !db_history_claim(db.conn, id) do return "", 0, false
+	if sql_exec(db.conn, "COMMIT") != SQLITE_DONE do return "", 0, false
+	committed = true
 	db.generation += 1
+	history_invalidate(db, id)
 	return token, claimed, true
 }
 
@@ -221,9 +254,12 @@ db_claim :: proc(db: ^Db, name: string, created_at: i64) -> (token: string, clai
 
 // Inserts a result, or returns the existing id when the same record was
 // already stored (an outbox retry after a lost response).
-db_insert_result :: proc(db: ^Db, s: Stored, record: []u8) -> (id: i64, created: bool, ok: bool) {
+db_insert_result :: proc(db: ^Db, s: Stored, record: []u8, analysis: []u8) -> (id: i64, created: bool, ok: bool) {
 	sync.guard(&db.lock)
 	sha := record_sha(record)
+	if sql_exec(db.conn, "BEGIN IMMEDIATE") != SQLITE_DONE do return 0, false, false
+	committed := false
+	defer if !committed do sql_exec(db.conn, "ROLLBACK")
 	rc := sql_exec(
 		db.conn,
 		`INSERT INTO results (created_at, mode, mode2, language, punctuation, numbers, wpm, raw, acc, consistency, duration, valid, record_sha, record, user_id, qgroup)
@@ -246,8 +282,14 @@ db_insert_result :: proc(db: ^Db, s: Stored, record: []u8) -> (id: i64, created:
 		i64(s.qgroup),
 	)
 	if rc == SQLITE_DONE {
+		id = last_insert_rowid(db.conn)
+		if sql_exec(db.conn, "INSERT INTO result_analytics VALUES (?, ?, ?)", id, i64(ANALYTICS_VERSION), analysis) != SQLITE_DONE do return 0, false, false
+		db_history_add(db.conn, s, analysis)
+		if sql_exec(db.conn, "COMMIT") != SQLITE_DONE do return 0, false, false
+		committed = true
 		db.generation += 1
-		return last_insert_rowid(db.conn), true, true
+		history_invalidate(db, s.user_id)
+		return id, true, true
 	}
 	if rc != SQLITE_CONSTRAINT {
 		return 0, false, false
@@ -310,29 +352,6 @@ collect :: proc(st: ^Stmt, allocator := context.allocator) -> []Stored {
 	return out[:]
 }
 
-db_user_recent :: proc(db: ^Db, user_id: i64, limit: i64, allocator := context.allocator) -> []Stored {
-	sync.guard(&db.lock)
-	st, ok := sql_prepare(db.conn, "SELECT " + COLUMNS + " FROM results r LEFT JOIN users u ON u.id = r.user_id WHERE r.user_id = ? ORDER BY r.id DESC LIMIT ?", user_id, limit)
-	return collect(st, allocator) if ok else nil
-}
-
-// A typist's best valid result for every test setup they have typed.
-db_user_bests :: proc(db: ^Db, user_id: i64, allocator := context.allocator) -> []Stored {
-	sync.guard(&db.lock)
-	st, ok := sql_prepare(
-		db.conn,
-		`SELECT ` + COLUMNS + ` FROM (
-		   SELECT r.*, ROW_NUMBER() OVER (
-		     PARTITION BY r.mode, CASE WHEN r.mode = 2 THEN r.qgroup ELSE r.mode2 END, r.language, r.punctuation, r.numbers
-		     ORDER BY r.wpm DESC, r.acc DESC, r.id ASC) AS rk
-		   FROM results r WHERE r.user_id = ? AND r.valid = 1) r
-		 LEFT JOIN users u ON u.id = r.user_id
-		 WHERE rk = 1 ORDER BY r.mode, r.mode2, r.qgroup, r.language, r.punctuation, r.numbers`,
-		user_id,
-	)
-	return collect(st, allocator) if ok else nil
-}
-
 // This typist's attempts at one quote, newest first.
 db_quote_attempts :: proc(db: ^Db, user_id: i64, language: string, quote_id: i32, allocator := context.allocator) -> []Stored {
 	sync.guard(&db.lock)
@@ -377,6 +396,7 @@ db_board :: proc(db: ^Db, b: Board, allocator := context.allocator) -> []Stored 
 			if v := column_int64(st, 0); v != db.data_version {
 				db.data_version = v
 				db.generation += 1
+				histories_clear(db)
 			}
 		}
 		finalize(st)

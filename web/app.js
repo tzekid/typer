@@ -101,7 +101,11 @@
         return;
       }
       const doc = new DOMParser().parseFromString(text, "text/html");
-      await window.typer?.prepare(doc.querySelector("main"));
+      const next = doc.querySelector("main");
+      await Promise.all([
+        window.typer?.prepare(next),
+        next?.dataset.page === "history" ? document.fonts.load('13px "DM Mono"', next.textContent) : null,
+      ]);
       if (mine !== latest) return;
       if (push) {
         history.replaceState({ y: scrollY }, "");
