@@ -197,6 +197,7 @@
       wordsText: $("words-text"),
     };
     ctx = el.canvas.getContext("2d", { alpha: false, desynchronized: true });
+    el.canvas.addEventListener("contextrestored", repaint);
     motion = still.matches ? 0 : cfg.caretMs;
     queue = { seed: cfg.queue?.seed, from: cfg.queue?.from ?? 0, quotes: cfg.quotes ?? [], next: 0 };
     seed = null;
@@ -682,6 +683,20 @@
     size();
     ex.mt_resize(cssWidth);
     kick();
+  });
+  // A tab in the background can lose its canvas pixels (Safari frees the
+  // backing store; a lost 2D context also forgets its scale and font), and
+  // frames only paint what changed. Coming back repaints everything.
+  function repaint() {
+    if (el === null || ex === null || document.visibilityState !== "visible") return;
+    size();
+    ex.mt_resize(cssWidth);
+    ex.mt_redraw();
+    kick();
+  }
+  document.addEventListener("visibilitychange", repaint);
+  addEventListener("pageshow", (e) => {
+    if (e.persisted) repaint();
   });
   addEventListener("pagehide", flush);
   addEventListener("typer:theme", () => {
