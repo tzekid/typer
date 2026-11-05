@@ -26,40 +26,35 @@ No npm, no framework, no accounts.
 
 ## Features
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/result-dark.webp">
-        <img alt="A result: 80 wpm at 97% accuracy, with a per-second chart of wpm, raw, burst and errors, and a readout for second 18" src="docs/screenshots/result-light.webp">
-      </picture>
-      <p><b>Monkeytype's numbers.</b> Wpm, raw, accuracy, consistency and the per-second chart, computed by the same rules, which also decide whether a result counts.</p>
-    </td>
-    <td width="50%" valign="top">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/leaderboard-dark.webp">
-        <img alt="The time 30 English leaderboard, ten typists ranked by their best valid result, the visitor's row highlighted" src="docs/screenshots/leaderboard-light.webp">
-      </picture>
-      <p><b>Leaderboards.</b> Each typist's best valid result, per mode, length and language. Every entry was replayed by the server.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.webp">
-        <img alt="History: 'Your latest 10 tests are 28.7 wpm faster than your first 10', above a chart of speed over six weeks with personal bests marked" src="docs/screenshots/history-light.webp">
-      </picture>
-      <p><b>History.</b> A finding first, then speed over time within one setup, with every personal best marked.</p>
-    </td>
-    <td width="50%" valign="top">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/keys-dark.webp">
-        <img alt="Where to improve: a keyboard shaded by error rate, missed words, recurring substitutions, slow letter pairs and accuracy through a test" src="docs/screenshots/keys-light.webp">
-      </picture>
-      <p><b>Where to improve.</b> Accuracy and speed per key, missed words, recurring substitutions, slow letter pairs, and pace through a test.</p>
-    </td>
-  </tr>
-</table>
+**Monkeytype's numbers.** Wpm, raw, accuracy, consistency and the per-second chart, computed by Monkeytype's rules, which also decide whether a result counts. Hover the chart for any second.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/result-dark.webp">
+  <img alt="A result: 80 wpm at 97% accuracy, a per-second chart of wpm, raw, burst and errors with the readout for second 18, and the test type, characters, consistency and time" src="docs/screenshots/result-light.webp">
+</picture>
+
+**Leaderboards.** Each typist's best valid result per mode, length and language, every one replayed by the server before it counts.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/leaderboard-dark.webp">
+  <img alt="The time 30 English leaderboard: ten typists ranked by their best valid result, the visitor's own row highlighted" src="docs/screenshots/leaderboard-light.webp">
+</picture>
+
+**History.** A finding first, then speed over time within one setup, with each new personal best marked.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.webp">
+  <img alt="History: 'Your latest 10 tests are 28.7 wpm faster than your first 10', above six weeks of speed with personal bests marked, then averages" src="docs/screenshots/history-light.webp">
+</picture>
+
+**Where to improve.** Accuracy and speed per key, missed words, recurring substitutions, slow letter pairs, and pace through a test.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/keys-dark.webp">
+  <img alt="A keyboard shaded by error rate, accuracy through the three thirds of a test, missed words, recurring substitutions and slow letter pairs" src="docs/screenshots/keys-light.webp">
+</picture>
+
+**On a phone** as on a desktop, in light or dark.
 
 <p align="center">
   <picture>
@@ -79,7 +74,7 @@ No npm, no framework, no accounts.
 | <kbd>Tab</kbd> | Restarts. During a test you get the same text again¹; before the first key and on the result, new text. |
 | <kbd>Esc</kbd> | On the result, repeats the test just done¹. |
 | <kbd>Enter</kbd> | Types a line break, shown as ↵, in quotes that have them. |
-| <kbd>Shift</kbd> <kbd>Tab</kbd> | Restarts a quote that contains tabs, where <kbd>Tab</kbd> types them. |
+| <kbd>Shift+Tab</kbd> | Restarts a quote that contains tabs, where <kbd>Tab</kbd> types them. |
 
 ¹ As on Monkeytype, a test whose words you have already seen doesn't count. A quote may be retried and still count.
 
