@@ -61,13 +61,16 @@ Live at <https://typer.plosca.ru>.
   (io_uring on Linux, kqueue on macOS) on top of SQLite. It serves:
   - server-rendered pages;
   - precompressed, content-hashed assets (brotli and gzip);
+  - the language packs, brotli-compressed at build time;
   - the per-browser quote queue windows;
   - the result API.
 
 Each result is stored as its record: the setup, the target text and every
 keystroke the engine applied. The server replays each upload through the
-same engine and ignores any numbers the client sends. For a quote result it
-also checks that the text typed is that quote.
+same engine and ignores any numbers the client sends. It also checks that a
+record is shaped as the island makes them: a time test ends exactly its length
+after it began, a words test has exactly its count of words, and a quote
+result's words are that quote's.
 
 Results wait in a `localStorage` outbox until the server acknowledges them,
 so a test finished while offline is uploaded later.
@@ -110,7 +113,8 @@ It:
 2. installs an immutable release under `~/.local/opt/typer/releases/<rev>`;
 3. switches the `current` link and restarts the `typer.service` user unit;
 4. checks `/healthz` and the running executable, and rolls back to the
-   previous release if either fails.
+   previous release if either fails;
+5. keeps the ten newest releases.
 
 Database migrations and replay backfill run before the server listens. Backfill
 walks result ids in order and commits batches of 100. New results save their

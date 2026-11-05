@@ -370,6 +370,7 @@ on_sent :: proc(op: ^nbio.Operation, c: ^Conn) {
 
 @(private)
 fail :: proc(c: ^Conn, status: int) {
+	fmt.printfln("event=request_refused status=%d", status)
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "HTTP/1.1 %d %s\r\ncontent-length: 0\r\nconnection: close\r\n\r\n", status, status_text(status))
 	c.head_out = transmute([]u8)strings.to_string(b)
