@@ -7,6 +7,7 @@ import "core:sync"
 
 
 HISTORY_CACHE_LIMIT :: 16
+HISTORY_CACHE_BYTES :: 32 * 1024 * 1024 // a typist's entry grows with every result
 DAY_MS :: i64(86_400_000)
 
 History_Group :: struct {
@@ -160,13 +161,6 @@ db_history :: proc(db: ^Db, user_id: i64) -> ^History {
 		cached.used = now_ms()
 		return &cached.data
 	}
-	if len(db.histories) >= HISTORY_CACHE_LIMIT {
-		old_id, oldest := i64(0), i64(0x7fff_ffff_ffff_ffff)
-		for id, cached in db.histories {
-			if cached.used < oldest do old_id, oldest = id, cached.used
-		}
-		history_invalidate(db, old_id)
-	}
 	entry := Cached_History{used = now_ms()}
 	_ = virtual.arena_init_growing(&entry.arena)
 	context.allocator = virtual.arena_allocator(&entry.arena)
@@ -260,6 +254,17 @@ db_history :: proc(db: ^Db, user_id: i64) -> ^History {
 	slice.stable_sort_by(h.groups[:], proc(a, b: History_Group) -> bool {
 		return len(a.all) > len(b.all)
 	})
+	// Least recently used typists leave until this one fits both budgets.
+	for len(db.histories) > 0 {
+		held := uint(0)
+		old_id, oldest := i64(0), i64(max(i64))
+		for id, cached in db.histories {
+			held += cached.arena.total_used
+			if cached.used < oldest do old_id, oldest = id, cached.used
+		}
+		if len(db.histories) < HISTORY_CACHE_LIMIT && held + entry.arena.total_used <= HISTORY_CACHE_BYTES do break
+		history_invalidate(db, old_id)
+	}
 	db.histories[user_id] = entry
 	cached := &db.histories[user_id]
 	return &cached.data
