@@ -135,9 +135,13 @@
           body,
           keepalive: body.length <= 60000,
         });
-        if (!res.ok && res.status !== 400) break;
+        // Rate limits and server trouble pass: keep the record for later. Any
+        // other refusal is final, and must not hold back the records after it.
+        if (res.status === 429 || res.status >= 500) break;
+        // By value: another tab may have flushed the same outbox meanwhile.
         const rest = readOutbox();
-        rest.shift();
+        const at = rest.indexOf(box[0]);
+        if (at >= 0) rest.splice(at, 1);
         localStorage.setItem(OUTBOX, JSON.stringify(rest));
         const loc = res.headers.get("location");
         if (res.ok && loc && rest.length === 0 && el && !el.result.hidden) {
