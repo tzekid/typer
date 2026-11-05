@@ -169,6 +169,7 @@ record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (
 		mode2       = setup.mode2,
 		punctuation = .Punctuation in setup.flags,
 		numbers     = .Numbers in setup.flags,
+		language    = language_rules(setup.language),
 	}
 	test_reset(t, cfg)
 	n := int(read_u32(&r))

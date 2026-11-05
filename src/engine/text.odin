@@ -35,6 +35,11 @@ Language_Rules :: enum u8 {
 	Russian,
 }
 
+// Upstream keys its language equivalences by the language without its size.
+language_rules :: proc(language: string) -> Language_Rules {
+	return .Russian if quote_language(language) == "russian" else .None
+}
+
 // areCharactersVisuallyEqual
 visually_equal :: proc "contextless" (a, b: rune, rules: Language_Rules) -> bool {
 	if a == b {

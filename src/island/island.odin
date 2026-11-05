@@ -289,6 +289,7 @@ mt_start :: proc "c" (mode, mode2: i32, flags: u32, seed_lo, seed_hi: u32) {
 		mode2       = mode2,
 		punctuation = .Punctuation in s.setup.flags,
 		numbers     = .Numbers in s.setup.flags,
+		language    = engine.language_rules(s.setup.language),
 	}
 	engine.test_reset(&s.test, cfg)
 	engine.generator_init(&s.gen, s.pack.list, s.setup.seed, cfg.punctuation, cfg.numbers)
