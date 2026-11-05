@@ -123,18 +123,18 @@ flowchart LR
 You need Odin at the version in [`.odinversion`](.odinversion), `clang` and `wasm-ld` on your PATH, `brotli`, `gzip` and the SQLite library.
 
 ```sh
-./build.sh upstream                                # Monkeytype at upstream.commit: word lists and quotes
-./build.sh                                         # packs, web assets and core.wasm, then build/typer
-build/typer serve /tmp/typer --packs build/packs   # http://127.0.0.1:9334
+./build.sh upstream   # fetch Monkeytype's word lists and quotes, pinned in upstream.commit
+./build.sh            # build the packs, the web assets, core.wasm and build/typer
+build/typer serve /tmp/typer --packs build/packs
 ```
 
-`./build.sh pack` and `./build.sh web` build single stages.
+Then open <http://127.0.0.1:9334>. `./build.sh pack` and `./build.sh web` build single stages.
 
 | Command | What it does |
 |---|---|
-| `typer serve <data dir> [--listen addr] [--packs dir] [--origin url]` | Runs the site. |
+| `typer serve <data dir>` | Runs the site. `--listen` (default `127.0.0.1:9334`), `--packs` and `--origin` (the public URL, for key links and the origin check) are optional. |
 | `typer doctor <data dir>` | Checks the database. |
-| `typer claim <data dir> <name> [--origin url]` | Creates the typist `<name>` and gives it every result saved before typists existed, which stay off the leaderboard until claimed. Prints the typist's key link. Safe while the server runs. |
+| `typer claim <data dir> <name>` | Creates the typist `<name>` and gives it every result saved before typists existed, which stay off the leaderboard until claimed. Prints the typist's key link (pass `--origin` for a full URL). Safe while the server runs. |
 
 ## Deploy
 
