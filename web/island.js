@@ -126,11 +126,14 @@
       for (;;) {
         const box = readOutbox();
         if (box.length === 0) break;
+        const body = fromB64(box[0]);
+        // keepalive lets a page being left finish the upload, but browsers
+        // refuse keepalive bodies over 64 KiB (long tests, long quotes).
         const res = await fetch("/results", {
           method: "POST",
           headers: { "content-type": "application/octet-stream" },
-          body: fromB64(box[0]),
-          keepalive: true,
+          body,
+          keepalive: body.length <= 60000,
         });
         if (!res.ok && res.status !== 400) break;
         const rest = readOutbox();
