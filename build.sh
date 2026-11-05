@@ -30,6 +30,9 @@ pack() {
   mkdir -p build
   odin build tools/pack -out:build/pack -o:speed "${VET[@]}"
   ./build/pack "$STATIC" build/packs
+  # Served as is to browsers that accept brotli; -q 9 is within 10% of -q 11
+  # in size and ten times faster over all 444 packs.
+  find build/packs/lang -name '*.bin' -print0 | xargs -0 -P 8 -I{} brotli -q 9 -f -o {}.br {}
 }
 
 # First 10 hex digits of the SHA-256, as the server names hashed assets.
@@ -38,7 +41,7 @@ hash10() {
 }
 
 web() {
-  [[ -f build/packs/lang/english.bin ]] || pack
+  [[ -f build/packs/lang/english.bin.br ]] || pack
   mkdir -p build/web
   odin build src/island -target:freestanding_wasm32 -no-entry-point -o:size -source-code-locations:obfuscated "${VET[@]}" -out:build/web/core.wasm
   cp web/island.js web/app.js build/web/

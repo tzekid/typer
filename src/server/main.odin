@@ -380,7 +380,9 @@ serve_pack :: proc(req: ^Request, res: ^Response) {
 		respond_text(res, 404, "not found")
 		return
 	}
-	data, ok := pack_mapping(name)
+	// build.sh compresses every pack: the large lists shrink about five times.
+	br := strings.contains(header(req, "accept-encoding"), "br")
+	data, ok := pack_mapping(strings.concatenate({name, ".bin.br" if br else ".bin"}))
 	if !ok {
 		respond_text(res, 404, "not found")
 		return
@@ -388,6 +390,11 @@ serve_pack :: proc(req: ^Request, res: ^Response) {
 	res.type = "application/octet-stream"
 	res.cache = "public, max-age=86400"
 	res.body = data
+	if br {
+		res.encoding = "br"
+	} else {
+		set_header(res, "vary", "accept-encoding")
+	}
 }
 
 // Packs are up to 10 MB and stay on the wire as long as the client takes to
@@ -397,11 +404,11 @@ serve_pack :: proc(req: ^Request, res: ^Response) {
 g_pack_maps: map[string][]u8
 
 @(private)
-pack_mapping :: proc(name: string) -> ([]u8, bool) {
-	if data, ok := g_pack_maps[name]; ok {
+pack_mapping :: proc(file: string) -> ([]u8, bool) {
+	if data, ok := g_pack_maps[file]; ok {
 		return data, true
 	}
-	path := strings.clone_to_cstring(strings.concatenate({g_packs, "/lang/", name, ".bin"}, context.temp_allocator), context.temp_allocator)
+	path := strings.clone_to_cstring(strings.concatenate({g_packs, "/lang/", file}, context.temp_allocator), context.temp_allocator)
 	fd := posix.open(path, {})
 	if fd < 0 {
 		return nil, false
@@ -419,7 +426,7 @@ pack_mapping :: proc(name: string) -> ([]u8, bool) {
 		g_pack_maps = make(map[string][]u8, 16, runtime.heap_allocator())
 	}
 	data := ([^]u8)(p)[:st.st_size]
-	g_pack_maps[strings.clone(name, runtime.heap_allocator())] = data
+	g_pack_maps[strings.clone(file, runtime.heap_allocator())] = data
 	return data, true
 }
 
