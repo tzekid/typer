@@ -853,7 +853,40 @@ button.quiet:hover,
   color: var(--text);
 }
 
-button.danger:hover {
+button.danger:hover,
+.button.danger:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+/* a destructive action behind a second, explicit step */
+details.confirm > summary {
+  list-style: none;
+}
+
+details.confirm > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.confirm[open] > summary {
+  display: none;
+}
+
+details.confirm form {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+}
+
+details.confirm p {
+  max-width: 18rem;
+  margin: 0;
+  color: var(--sub);
+  font-size: 0.86rem;
+  text-align: right;
+}
+
+details.confirm button {
   border-color: var(--error);
   color: var(--error);
 }
@@ -1210,8 +1243,12 @@ td.date a {
   .setting {
     grid-template-columns: 1fr;
   }
-  .setting .control {
+  .setting .control,
+  details.confirm form {
     justify-items: start;
+  }
+  details.confirm p {
+    text-align: left;
   }
   .setting input.key {
     width: 100%;

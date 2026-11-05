@@ -503,7 +503,8 @@ render_me_page :: proc(b: ^strings.Builder, p: Page, token: string, message: str
 	w(b, `" aria-label="key link"><button type="button" class="quiet" data-copy>copy</button></div>`)
 	setting_end(b)
 	setting_start(b, "this browser", "Forgetting only signs this browser out; your results stay, and the key link brings them back.")
-	w(b, `<form method="post" action="/me/forget"><button class="quiet danger">forget me here</button></form>`)
+	// Two steps, without script: losing the key link loses the typist.
+	w(b, `<details class="confirm"><summary class="button quiet danger">forget me here</summary><form method="post" action="/me/forget"><p>Without the key link above, nothing brings these results back here.</p><button class="danger">forget this browser</button></form></details>`)
 	setting_end(b)
 	if message != "" && !problem {
 		toast(b, message)
