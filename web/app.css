@@ -1077,7 +1077,7 @@ td.date a {
   color: var(--sub);
 }
 
-.rank.top {
+.rank.podium {
   color: var(--main-big);
   font-weight: 600;
 }

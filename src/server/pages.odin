@@ -369,7 +369,7 @@ results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlig
 		w(b, `>`)
 		if ranked {
 			w(b, `<td class="num rank`)
-			if i < 3 do w(b, ` top`)
+			if i < 3 do w(b, ` podium`)
 			w(b, `">`)
 			strings.write_int(b, i + 1)
 			w(b, `</td><td><a href="/results/`)
