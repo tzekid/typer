@@ -416,10 +416,19 @@ replay :: proc(record: []u8) -> (r: Replayed, ok: bool) {
 		if !known_language(setup.language) || setup.mode2 < 1 || setup.mode2 > MODE2_MAX {
 			return {}, false
 		}
+		// The island deals a words test exactly its count of words.
+		if setup.mode == .Words && engine.word_count(&r.test) != setup.mode2 {
+			return {}, false
+		}
 	case .Zen, .Custom:
 		return {}, false
 	}
 	if !engine.record_replay(&r.test, events) {
+		return {}, false
+	}
+	// The island ends a time test exactly mode2 seconds after it began, so a
+	// result filed under a length is one of that length.
+	if setup.mode == .Time && r.test.end_ms != r.test.start_ms + f64(setup.mode2) * 1000 {
 		return {}, false
 	}
 	res := engine.build_result(&r.test)

@@ -228,8 +228,20 @@ ensure_slot :: proc(t: ^Test, i: i32) {
 		cap = 32
 	}
 	off := i32(len(t.input_pool))
-	resize(&t.input_pool, len(t.input_pool) + int(cap))
+	extend(&t.input_pool, int(cap))
 	t.slots[i] = Word_Slot{off = off, len = 0, cap = cap}
+}
+
+// Adds n zeroed elements, doubling the capacity when it runs out. resize
+// alone reserves the exact length, which in an arena copies the whole array
+// on every call: quadratic memory over a long test.
+@(private)
+extend :: proc(a: ^[dynamic]$T, n: int) {
+	need := len(a) + n
+	if need > cap(a) {
+		reserve(a, max(need, 2 * cap(a)))
+	}
+	resize(a, need)
 }
 
 @(private)
@@ -494,8 +506,15 @@ pressed_index :: proc(t: ^Test, code: u16) -> int {
 	return -1
 }
 
+// More keys without a code held at once than any keyboard has: ignored, which
+// keeps the pressed list, and every lookup in it, short.
+NO_CODE_HELD_MAX :: 128
+
 test_key_down :: proc(t: ^Test, ms: f64, code: u16, repeat: bool) {
 	if repeat || !key_is_tracked(code) {
+		return
+	}
+	if code == KEY_NO_CODE && t.no_code_index >= NO_CODE_HELD_MAX {
 		return
 	}
 	if i := pressed_index(t, code); i >= 0 {
@@ -642,10 +661,10 @@ cleanup :: proc(t: ^Test) {
 	}
 	resize(&t.inputs, n)
 
-	post_end := make([dynamic]u16, 0, 8, context.temp_allocator)
+	post_end := make(map[u16]struct{}, 8, context.temp_allocator)
 	for e in t.keydowns {
 		if e.ms > end {
-			append(&post_end, e.code)
+			post_end[e.code] = {}
 		}
 	}
 	n = 0
@@ -659,17 +678,7 @@ cleanup :: proc(t: ^Test) {
 
 	n = 0
 	for e in t.keyups {
-		keep := e.ms <= end
-		if !keep {
-			keep = true
-			for c in post_end {
-				if c == e.code {
-					keep = false
-					break
-				}
-			}
-		}
-		if keep {
+		if e.ms <= end || e.code not_in post_end {
 			t.keyups[n] = e
 			n += 1
 		}

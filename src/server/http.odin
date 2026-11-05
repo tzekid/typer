@@ -106,6 +106,8 @@ status_text :: proc(code: int) -> string {
 		return "Request Header Fields Too Large"
 	case 500:
 		return "Internal Server Error"
+	case 501:
+		return "Not Implemented"
 	case 503:
 		return "Service Unavailable"
 	}
@@ -277,6 +279,12 @@ next :: proc(c: ^Conn) {
 	c.req = {}
 	if !parse_head(string(c.buf[:head_end - 4]), &c.req) {
 		fail(c, 400)
+		return
+	}
+	// Only Content-Length bodies are read: a chunked body left in the buffer
+	// would be parsed as the proxy's next request on this connection.
+	if header(&c.req, "transfer-encoding") != "" {
+		fail(c, 501)
 		return
 	}
 	length := 0

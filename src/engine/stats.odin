@@ -388,14 +388,23 @@ count_chars :: proc(input: []rune, target: []rune, credit_partial: bool) -> Char
 // first appearance and reads each word's input from its last snapshot).
 @(private)
 Word_Replay :: struct {
-	order:       [dynamic]i32,
-	seen:        [dynamic]bool,
-	input_off:   [dynamic]i32,
-	input_len:   [dynamic]i32,
-	pool:        [dynamic]rune,
-	last_is_sp:  [dynamic]bool, // last event of the word is an insertText of " "
-	dirty:       [dynamic]bool,
+	order:      [dynamic]i32, // words in order of first appearance
+	pos:        []i32, // each seen word's place in order
+	seen:       []bool,
+	input_off:  []i32,
+	input_len:  []i32,
+	input_cap:  []i32,
+	pool:       [dynamic]rune, // seen words' inputs, spaces normalized to ' '
+	last_is_sp: []bool, // last event of the word is an insertText of " "
+	dirty:      [dynamic]i32, // words whose input may have changed since the last take
+	is_dirty:   []bool,
 }
+
+// Space a word's replayed input may use past its target. In arrival order the
+// engine never lets it grow past 21 extra runes; the log is replayed in time
+// order, where an upload can make it grow without bound, so it is clamped.
+@(private)
+REPLAY_SLACK :: 32
 
 @(private)
 replay_init :: proc(r: ^Word_Replay, t: ^Test) {
@@ -406,32 +415,37 @@ replay_init :: proc(r: ^Word_Replay, t: ^Test) {
 		}
 	}
 	a := context.temp_allocator
-	r.order = make([dynamic]i32, 0, n, a)
-	r.seen = make([dynamic]bool, n, a)
-	r.input_off = make([dynamic]i32, n, a)
-	r.input_len = make([dynamic]i32, n, a)
-	r.last_is_sp = make([dynamic]bool, n, a)
-	r.dirty = make([dynamic]bool, n, a)
-	r.pool = make([dynamic]rune, 0, 64, a)
-	for i in 0 ..< n {
-		cap := len(target_word(t, i32(i))) + 64
-		r.input_off[i] = i32(len(r.pool))
-		resize(&r.pool, len(r.pool) + cap)
-	}
+	r.order = make([dynamic]i32, 0, 64, a)
+	r.pos = make([]i32, n, a)
+	r.seen = make([]bool, n, a)
+	r.input_off = make([]i32, n, a)
+	r.input_len = make([]i32, n, a)
+	r.input_cap = make([]i32, n, a)
+	r.last_is_sp = make([]bool, n, a)
+	r.dirty = make([dynamic]i32, 0, 64, a)
+	r.is_dirty = make([]bool, n, a)
+	r.pool = make([dynamic]rune, 0, 1024, a)
 }
 
 // applyInputEvent
 @(private)
-replay_apply :: proc(r: ^Word_Replay, e: Event) {
+replay_apply :: proc(r: ^Word_Replay, t: ^Test, e: Event) {
 	if e.kind != .Input {
 		return
 	}
 	w := e.word_index
 	if !r.seen[w] {
 		r.seen[w] = true
+		r.pos[w] = i32(len(r.order))
 		append(&r.order, w)
+		r.input_off[w] = i32(len(r.pool))
+		r.input_cap[w] = i32(len(target_word(t, w))) + REPLAY_SLACK
+		extend(&r.pool, int(r.input_cap[w]))
 	}
-	r.dirty[w] = true
+	if !r.is_dirty[w] {
+		r.is_dirty[w] = true
+		append(&r.dirty, w)
+	}
 	r.last_is_sp[w] = e.input_type == .Insert_Text && e.data == ' '
 	switch e.input_type {
 	case .Insert_Text:
@@ -441,17 +455,23 @@ replay_apply :: proc(r: ^Word_Replay, e: Event) {
 		if e.data == ' ' && .Last_Word in e.flags && .Commits_Word in e.flags && .Correct not_in e.flags {
 			return
 		}
-		r.pool[r.input_off[w] + r.input_len[w]] = e.data
-		r.input_len[w] += 1
+		replay_push(r, w, e.data)
 	case .Insert_Composition_Text:
 		if .Input_Stopped in e.flags {
 			return
 		}
-		r.pool[r.input_off[w] + r.input_len[w]] = e.data
-		r.input_len[w] += 1
+		replay_push(r, w, e.data)
 	case .Delete_Content_Backward, .Delete_Word_Backward:
 		r.input_len[w] = clamp(e.input_len, 0, r.input_len[w])
 	case .None:
+	}
+}
+
+@(private)
+replay_push :: proc(r: ^Word_Replay, w: i32, c: rune) {
+	if r.input_len[w] < r.input_cap[w] {
+		r.pool[r.input_off[w] + r.input_len[w]] = ' ' if is_space(c) else c
+		r.input_len[w] += 1
 	}
 }
 
@@ -460,15 +480,9 @@ replay_input :: proc(r: ^Word_Replay, w: i32) -> []rune {
 	return r.pool[r.input_off[w]:r.input_off[w] + r.input_len[w]]
 }
 
-// inferActiveWordIndex
+// inferActiveWordIndex, given the highest word index with input (-1 if none).
 @(private)
-replay_active_word :: proc(r: ^Word_Replay) -> i32 {
-	max_w := i32(-1)
-	for w in r.order {
-		if r.input_len[w] > 0 && w > max_w {
-			max_w = w
-		}
-	}
+replay_active_word :: proc(r: ^Word_Replay, max_w: i32) -> i32 {
 	if max_w < 0 {
 		return 0
 	}
@@ -482,15 +496,11 @@ replay_active_word :: proc(r: ^Word_Replay) -> i32 {
 @(private)
 count_word :: proc(t: ^Test, r: ^Word_Replay, w: i32, last_word, count_partial: bool) -> Char_Counts {
 	input := replay_input(r, w)
-	norm := make([]rune, len(input), context.temp_allocator)
-	for c, i in input {
-		norm[i] = ' ' if is_space(c) else c
-	}
 	target := target_word(t, w)
 	if target == nil {
-		target = norm
+		target = input
 	}
-	return count_chars(norm, target, last_word && count_partial)
+	return count_chars(input, target, last_word && count_partial)
 }
 
 // getChars
@@ -498,9 +508,15 @@ chars :: proc(t: ^Test, count_partial_last_word := false) -> Char_Counts {
 	r: Word_Replay
 	replay_init(&r, t)
 	for e in t.log {
-		replay_apply(&r, e)
+		replay_apply(&r, t, e)
 	}
-	last := replay_active_word(&r)
+	max_w := i32(-1)
+	for w in r.order {
+		if r.input_len[w] > 0 && w > max_w {
+			max_w = w
+		}
+	}
+	last := replay_active_word(&r, max_w)
 	count_partial := is_timed_test(t) || t.bailed_out || count_partial_last_word
 	acc: Char_Counts
 	for w in r.order {
@@ -525,7 +541,9 @@ History_Kind :: enum u8 {
 }
 
 // getWpmHistory / getRawHistory: cumulative speed at each boundary, counting
-// the active word with partial credit.
+// the active word with partial credit: the words before it in order of first
+// appearance, then it. Two Fenwick trees keep each boundary at O(log n), so a
+// long test with many words costs no more than its events.
 history :: proc(t: ^Test, boundaries: []f64, kind: History_Kind, allocator := context.temp_allocator) -> []f64 {
 	out := make([]f64, len(boundaries), allocator)
 	if len(boundaries) == 0 {
@@ -536,43 +554,85 @@ history :: proc(t: ^Test, boundaries: []f64, kind: History_Kind, allocator := co
 	n := len(r.seen)
 	if_last := make([]i32, n, context.temp_allocator)
 	if_not_last := make([]i32, n, context.temp_allocator)
+	sums := make([]i64, n + 1, context.temp_allocator) // if_not_last, by place in order
+	filled := make([]i32, n + 1, context.temp_allocator) // 1 for each word index with input
 	ei := 0
 	for b, bi in boundaries {
-		for ei < len(t.log) {
+		for ei < len(t.log) && t.log[ei].t <= b {
 			e := t.log[ei]
-			if e.t > b {
-				break
-			}
-			replay_apply(&r, e)
 			ei += 1
-		}
-		for w in r.order {
-			if !r.dirty[w] {
+			if e.kind != .Input {
 				continue
 			}
-			r.dirty[w] = false
-			nl := count_word(t, &r, w, false, true)
-			l := count_word(t, &r, w, true, true)
-			if kind == .Wpm {
-				if_not_last[w] = nl.correct_word
-				if_last[w] = l.correct_word
-			} else {
-				if_not_last[w] = nl.all_correct + nl.extra + nl.incorrect
-				if_last[w] = l.all_correct + l.extra + l.incorrect
+			w := e.word_index
+			had := r.input_len[w] > 0
+			replay_apply(&r, t, e)
+			if has := r.input_len[w] > 0; has != had {
+				fenwick_add(filled, int(w), 1 if has else -1)
 			}
 		}
-		last := replay_active_word(&r)
-		sum: i32
-		for w in r.order {
-			if w == last {
-				sum += if_last[w]
-				break
+		for w in r.dirty {
+			r.is_dirty[w] = false
+			nl := count_word(t, &r, w, false, true)
+			l := count_word(t, &r, w, true, true)
+			nl_v, l_v := nl.correct_word, l.correct_word
+			if kind == .Raw {
+				nl_v = nl.all_correct + nl.extra + nl.incorrect
+				l_v = l.all_correct + l.extra + l.incorrect
 			}
-			sum += if_not_last[w]
+			fenwick_add(sums, int(r.pos[w]), i64(nl_v - if_not_last[w]))
+			if_not_last[w], if_last[w] = nl_v, l_v
+		}
+		clear(&r.dirty)
+		last := replay_active_word(&r, fenwick_last(filled))
+		sum: i64
+		if last < i32(n) && r.seen[last] {
+			sum = fenwick_sum(sums, int(r.pos[last])) + i64(if_last[last])
+		} else {
+			sum = fenwick_sum(sums, len(r.order))
 		}
 		out[bi] = js_round(calc_wpm(f64(sum), b / 1000))
 	}
 	return out
+}
+
+// Fenwick tree helpers over 0-based indices; tree[0] is unused.
+@(private)
+fenwick_add :: proc(tree: []$T, i: int, v: T) {
+	for k := i + 1; k < len(tree); k += k & -k {
+		tree[k] += v
+	}
+}
+
+// The sum of entries [0, i).
+@(private)
+fenwick_sum :: proc(tree: []$T, i: int) -> T {
+	s: T
+	for k := i; k > 0; k -= k & -k {
+		s += tree[k]
+	}
+	return s
+}
+
+// The highest index holding a 1 in a tree of 0/1 flags, or -1.
+@(private)
+fenwick_last :: proc(tree: []i32) -> i32 {
+	k := fenwick_sum(tree, len(tree) - 1)
+	if k == 0 {
+		return -1
+	}
+	step := 1
+	for step * 2 < len(tree) {
+		step *= 2
+	}
+	at := 0
+	for ; step > 0; step >>= 1 {
+		if at + step < len(tree) && tree[at + step] < k {
+			at += step
+			k -= tree[at]
+		}
+	}
+	return i32(at)
 }
 
 // buildCompletedEvent (the statistics part).

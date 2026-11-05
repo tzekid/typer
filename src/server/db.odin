@@ -375,6 +375,9 @@ Board :: struct {
 }
 
 BOARD_SIZE :: 50
+// Any setup and language can be asked for, so the cache starts over when this
+// many boards are held rather than grow with every distinct URL.
+BOARD_CACHE_LIMIT :: 64
 
 @(private)
 board_key :: proc(b: Board, allocator := context.temp_allocator) -> string {
@@ -411,6 +414,14 @@ db_board :: proc(db: ^Db, b: Board, allocator := context.allocator) -> []Stored 
 		virtual.arena_destroy(&entry.arena)
 		entry.arena = {}
 	} else {
+		if len(db.boards) >= BOARD_CACHE_LIMIT {
+			for k, v in db.boards {
+				cached := v
+				virtual.arena_destroy(&cached.arena)
+				delete(k, runtime.heap_allocator())
+			}
+			clear(&db.boards)
+		}
 		key = strings.clone(key, runtime.heap_allocator())
 	}
 	_ = virtual.arena_init_growing(&entry.arena)
