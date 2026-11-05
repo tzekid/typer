@@ -410,9 +410,10 @@ BOARD_TIMES := [?]i32{15, 30, 60, 120}
 BOARD_WORDS := [?]i32{10, 25, 50, 100}
 
 @(private)
-board_href :: proc(b: ^strings.Builder, board: Board) {
+board_href :: proc(b: ^strings.Builder, board: Board, path := "/leaderboard?") {
 	q := strings.builder_make(context.temp_allocator)
-	w(&q, "/leaderboard?mode=")
+	w(&q, path)
+	w(&q, "mode=")
 	w(&q, mode_word(board.mode))
 	if board.mode == .Quote {
 		w(&q, "&q=")
@@ -465,8 +466,8 @@ render_leaderboard_page :: proc(b: ^strings.Builder, p: Page, board: Board, rows
 		}
 		w(b, `</span>`)
 	}
-	w(b, `</span><i class="sep"></i><a class="lang" href="/languages?board=1&amp;mode=`)
-	w(b, mode_word(board.mode))
+	w(b, `</span><i class="sep"></i><a class="lang" href="`)
+	board_href(b, board, "/languages?board=1&")
 	w(b, `">`)
 	engine.html_text(b, board.language)
 	w(b, `</a></nav>`)
@@ -523,14 +524,14 @@ render_settings_page :: proc(b: ^strings.Builder, p: Page) {
 	page_end(b)
 }
 
-render_languages_page :: proc(b: ^strings.Builder, p: Page, s: Test_Setup, board: bool, languages: []string) {
+render_languages_page :: proc(b: ^strings.Builder, p: Page, s: Test_Setup, board: Maybe(Board), languages: []string) {
 	page_start(b, p, "languages · typer", "languages")
 	w(b, `<div class="find"><input type="search" placeholder="find a language" aria-label="find a language" autocomplete="off" data-filter=".languages li" autofocus></div><ul class="languages">`)
 	for l in languages {
 		w(b, `<li><a href="`)
-		if board {
-			x := Board{mode = s.mode, mode2 = 30 if s.mode == .Time else 25, language = l}
-			board_href(b, x)
+		if bd, ok := board.?; ok {
+			bd.language = l
+			board_href(b, bd)
 		} else {
 			x := s
 			x.language = l

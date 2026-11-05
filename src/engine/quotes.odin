@@ -253,5 +253,13 @@ test_matches_quote :: proc(t: ^Test, text: string) -> bool {
 	defer test_destroy(&probe)
 	test_reset(&probe, t.cfg)
 	test_add_quote(&probe, text)
-	return runes_equal(probe.target[:], t.target[:]) && len(probe.target_off) == len(t.target_off)
+	if !runes_equal(probe.target[:], t.target[:]) || len(probe.target_off) != len(t.target_off) {
+		return false
+	}
+	for off, i in probe.target_off {
+		if off != t.target_off[i] {
+			return false
+		}
+	}
+	return true
 }

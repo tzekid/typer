@@ -112,7 +112,7 @@ render_history_findings :: proc(b: ^strings.Builder, g: ^History_Group) {
 }
 
 render_history_page :: proc(b: ^strings.Builder, p: Page, h: ^History, selected: int, query: string) {
-	page_start(b, p, "history | typer", "history", {"DMMono-latin.woff2"})
+	page_start(b, p, "history · typer", "history", {"DMMono-latin.woff2"})
 	w(b, `<div class="history-dashboard"><header class="history-heading"><h1>Your typing</h1>`)
 	if h == nil || h.tests == 0 {
 		w(b, `</header><section class="history-start"><div class="start-keys" aria-hidden="true"><span>t</span><span>y</span><span>p</span><span>e</span></div><h2>Start with a test.</h2><p>Finish a test to see your speed and accuracy here. As you type more, you'll find the keys and letter pairs that need practice.</p><a class="button" href="/">Start typing</a><p class="history-caption">Your history stays with this browser. The key link on your name's page brings it to another device.</p></section></div>`)
