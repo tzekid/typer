@@ -60,4 +60,12 @@ if [[ -n "$prior" ]]; then
   ln -s "$prior" "$stage_dir/previous"
   mv -Tf "$stage_dir/previous" "$release_root/previous"
 fi
+# Each release carries its own packs (~120 MB): keep the ten newest, and
+# never the ones current or previous point at.
+keep="$(readlink "$release_root/current") $(readlink "$release_root/previous" || true)"
+for old in $(ls -1t "$release_root/releases" | tail -n +11); do
+  [[ " $keep " == *" releases/$old "* ]] && continue
+  chmod -R u+w -- "$release_root/releases/$old"
+  rm -rf -- "$release_root/releases/$old"
+done
 printf 'Published release %s\n' "$revision"
