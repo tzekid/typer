@@ -1,11 +1,13 @@
 package server
 
+import "base:runtime"
 import "core:crypto"
 import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:sys/posix"
 import "core:time"
 
 import engine "../engine"
@@ -378,14 +380,47 @@ serve_pack :: proc(req: ^Request, res: ^Response) {
 		respond_text(res, 404, "not found")
 		return
 	}
-	data, err := os.read_entire_file(strings.concatenate({g_packs, "/lang/", name, ".bin"}), context.allocator)
-	if err != nil {
+	data, ok := pack_mapping(name)
+	if !ok {
 		respond_text(res, 404, "not found")
 		return
 	}
 	res.type = "application/octet-stream"
 	res.cache = "public, max-age=86400"
 	res.body = data
+}
+
+// Packs are up to 10 MB and stay on the wire as long as the client takes to
+// read them. Mapped once and kept, they are shared, reclaimable file pages;
+// read per request, a few slow downloads held more than the service may use.
+@(private)
+g_pack_maps: map[string][]u8
+
+@(private)
+pack_mapping :: proc(name: string) -> ([]u8, bool) {
+	if data, ok := g_pack_maps[name]; ok {
+		return data, true
+	}
+	path := strings.clone_to_cstring(strings.concatenate({g_packs, "/lang/", name, ".bin"}, context.temp_allocator), context.temp_allocator)
+	fd := posix.open(path, {})
+	if fd < 0 {
+		return nil, false
+	}
+	defer posix.close(fd)
+	st: posix.stat_t
+	if posix.fstat(fd, &st) != .OK || st.st_size <= 0 {
+		return nil, false
+	}
+	p := posix.mmap(nil, uint(st.st_size), {.READ}, {.PRIVATE}, fd)
+	if p == posix.MAP_FAILED {
+		return nil, false
+	}
+	if g_pack_maps == nil {
+		g_pack_maps = make(map[string][]u8, 16, runtime.heap_allocator())
+	}
+	data := ([^]u8)(p)[:st.st_size]
+	g_pack_maps[strings.clone(name, runtime.heap_allocator())] = data
+	return data, true
 }
 
 Replayed :: struct {
@@ -549,9 +584,9 @@ history_page :: proc(req: ^Request, res: ^Response) {
 	html_response(res, &b)
 }
 
+// The board a leaderboard URL asks for, or the default one.
 @(private)
-leaderboard_page :: proc(req: ^Request, res: ^Response) {
-	q := req.query
+board_from_query :: proc(q: string) -> Board {
 	board := Board{mode = .Time, mode2 = 30, language = "english"}
 	switch query_value(q, "mode") {
 	case "words":
@@ -578,6 +613,12 @@ leaderboard_page :: proc(req: ^Request, res: ^Response) {
 	if board.mode == .Quote {
 		board.language = engine.quote_language(board.language)
 	}
+	return board
+}
+
+@(private)
+leaderboard_page :: proc(req: ^Request, res: ^Response) {
+	board := board_from_query(req.query)
 	b := strings.builder_make()
 	render_leaderboard_page(&b, page_for(req), board, db_board(&g_db, board))
 	html_response(res, &b)
@@ -708,16 +749,12 @@ languages_page :: proc(req: ^Request, res: ^Response) {
 	} else if query_value(req.query, "mode") == "quote" {
 		s.mode = .Quote
 	}
-	board := query_value(req.query, "board") == "1"
-	if board {
-		switch query_value(req.query, "mode") {
-		case "words":
-			s.mode = .Words
-		case "quote":
-			s.mode = .Quote
-		case:
-			s.mode = .Time
-		}
+	// From a leaderboard: the same board in each language.
+	board: Maybe(Board)
+	if query_value(req.query, "board") == "1" {
+		bd := board_from_query(req.query)
+		board = bd
+		s.mode, s.language = bd.mode, bd.language
 	}
 	b := strings.builder_make()
 	render_languages_page(&b, page_for(req), s, board, g_quote_languages if s.mode == .Quote else g_languages)
