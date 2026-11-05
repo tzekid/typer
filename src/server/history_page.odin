@@ -677,7 +677,7 @@ render_history_recent :: proc(b: ^strings.Builder, g: ^History_Group, query: str
 	page = clamp(page, 0, max(0, pages - 1))
 	end := max(0, count - page * 10)
 	start := max(0, end - 10)
-	w(b, `<section class="history-recent"><div class="history-section-heading"><h2>Recent tests</h2><p>`)
+	w(b, `<section class="history-recent" id="recent"><div class="history-section-heading"><h2>Recent tests</h2><p>`)
 	strings.write_int(b, count)
 	w(b, ` in this setup</p></div><table><caption class="sr-only">Recent tests for the selected setup. Dates are UTC. Open a date for the complete result.</caption><thead><tr><th scope="col">Date, UTC</th><th scope="col" class="num">wpm</th><th scope="col" class="num">Accuracy</th><th scope="col" class="num history-extra">Raw</th><th scope="col" class="num history-extra">Consistency</th></tr></thead><tbody>`)
 	#reverse for s in g.all[start:end] {
@@ -710,7 +710,7 @@ render_history_recent :: proc(b: ^strings.Builder, g: ^History_Group, query: str
 		if page > 0 {
 			w(b, `<a href="`)
 			history_href(b, g, page - 1)
-			w(b, `">Newer tests</a>`)
+			w(b, `#recent">Newer tests</a>`)
 		}
 		w(b, `<span>Page `)
 		strings.write_int(b, page + 1)
@@ -720,7 +720,7 @@ render_history_recent :: proc(b: ^strings.Builder, g: ^History_Group, query: str
 		if page + 1 < pages {
 			w(b, `<a href="`)
 			history_href(b, g, page + 1)
-			w(b, `">Older tests</a>`)
+			w(b, `#recent">Older tests</a>`)
 		}
 		w(b, `</nav>`)
 	}

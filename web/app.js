@@ -109,9 +109,11 @@
       if (mine !== latest) return;
       if (push) {
         history.replaceState({ y: scrollY }, "");
-        history.pushState(null, "", res.url);
+        history.pushState(null, "", res.url + new URL(href).hash);
       }
       swap(doc, push ? 0 : history.state?.y ?? 0);
+      // A link into the page (#recent) lands there, as it would without script.
+      if (push && new URL(href).hash) document.getElementById(new URL(href).hash.slice(1))?.scrollIntoView();
     } catch (_) {
       // offline or the server is restarting: let the browser say so
       if (mine === latest) location.assign(href);
