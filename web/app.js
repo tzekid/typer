@@ -54,7 +54,10 @@
     return url;
   }
 
-  const load = (href, init) => fetch(href, { ...init, headers: { accept: "text/html" } });
+  const load = async (href, init) => {
+    await settingsSave;
+    return fetch(href, { ...init, headers: { accept: "text/html" } });
+  };
 
   // Most clicks start ~80 ms before they finish: begin fetching right away.
   document.addEventListener("pointerdown", (e) => {
@@ -148,14 +151,24 @@
 
   // ------ settings save as they change
 
+  let settingsSave = Promise.resolve();
+  let settingsVersion = 0;
   document.addEventListener("change", (e) => {
     const form = e.target.form;
     if (!form?.hasAttribute("data-autosave")) return;
     if (e.target.name === "theme") setTheme(e.target.value === "system" ? "" : e.target.value, true);
     const saved = form.querySelector("[data-saved]");
-    fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)) }).then((res) => {
-      if (res.ok && saved) replay(saved);
-    });
+    const body = new URLSearchParams(new FormData(form));
+    const version = ++settingsVersion;
+    if (saved) saved.hidden = true;
+    // Set-Cookie responses must arrive in the same order as the choices.
+    settingsSave = settingsSave.then(() => fetch(form.action, { method: "POST", body }))
+      .then((res) => {
+        if (!res.ok) throw new Error("Could not save settings. Please try again.");
+        if (version === settingsVersion && saved?.isConnected) replay(saved);
+      }).catch(() => {
+        if (version === settingsVersion && form.isConnected) problem("Could not save settings. Please try again.");
+      });
   });
 
   // Shows a toast again from the start (its CSS animation hides it).

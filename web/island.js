@@ -73,12 +73,11 @@
     return booting;
   }
 
-  async function usePack(language, url) {
+  function usePack(language, bytes) {
     if (language === packLanguage) return;
     let ok;
     if (language === "english") ok = ex.mt_use_english();
     else {
-      const [bytes] = await Promise.all([fetch(url).then((r) => r.arrayBuffer()), document.fonts.load(FONT, LATIN_EXT)]);
       const p = ex.mt_alloc(bytes.byteLength);
       views().set(new Uint8Array(bytes), p);
       ok = ex.mt_set_pack(p, bytes.byteLength);
@@ -93,11 +92,22 @@
   };
 
   // Everything a test page needs before it is shown, so it appears drawn.
-  async function prepare(main) {
+  const prepared = new WeakMap();
+  function prepare(main) {
     const c = configOf(main);
     if (c === null) return;
-    await boot();
-    await usePack(c.language, c.pack);
+    if (!prepared.has(main)) {
+      prepared.set(main, Promise.all([
+        boot(),
+        c.language === "english" ? null : fetch(c.pack).then((res) => {
+          if (!res.ok) throw new Error(`language pack ${c.language} failed to load`);
+          return res.arrayBuffer();
+        }),
+        c.language === "english" ? null : document.fonts.load(FONT, LATIN_EXT),
+      ]).then(([, bytes]) => bytes));
+    }
+    // Preparing a page must not mutate the engine of the mounted test.
+    return prepared.get(main);
   }
 
   // ------ results outbox: kept until the server acknowledges them
@@ -190,7 +200,6 @@
   let repeated = false;
   let seed = null; // of the words now shown, for a restart with the same ones
   let queue = null;
-  let refilling = null;
 
   // fade: the page itself is new (app.js fades pages it swaps in).
   function mount(main, fade = false) {
@@ -220,8 +229,9 @@
     listen(el);
     const mine = el;
     prepare(main)
-      .then(() => {
+      .then((bytes) => {
         if (el !== mine) return;
+        usePack(cfg.language, bytes);
         lineH = ex.mt_line_height();
         el.caret.style.height = `${lineH}px`;
         el.clip.style.height = `${lineH * 3}px`;
@@ -395,25 +405,27 @@
   // at a time; the cookie remembers the position across page loads.
 
   function refill() {
-    if (refilling) return refilling;
     const q = queue;
+    if (q.refilling) return q.refilling;
     const at = q.from + q.quotes.length;
     const url = `/quotes?lang=${encodeURIComponent(cfg.language)}&q=${cfg.quoteGroups}&seed=${q.seed}&from=${at}`;
-    refilling = fetch(url)
+    q.refilling = fetch(url)
       .then((r) => (r.ok ? r.json() : []))
       .then((more) => {
         q.quotes.push(...more);
       })
       .catch(() => {})
       .finally(() => {
-        refilling = null;
+        q.refilling = null;
       });
-    return refilling;
+    return q.refilling;
   }
 
   // Hands the next quote to the core. False when there is none to hand.
   async function nextQuote() {
+    const mine = queue;
     if (queue.next >= queue.quotes.length) await refill();
+    if (queue !== mine || el === null) return false;
     const q = queue.quotes[queue.next];
     if (q === undefined) return false;
     queue.next++;
@@ -439,9 +451,13 @@
     const mine = el;
     same &&= seed !== null;
     if (!same) {
-      if (cfg.mode === QUOTE && !(await nextQuote())) {
-        el.stage.textContent = "no quotes of this length here yet";
-        return;
+      if (cfg.mode === QUOTE) {
+        const ready = await nextQuote();
+        if (el !== mine) return;
+        if (!ready) {
+          el.stage.textContent = "no quotes of this length here yet";
+          return;
+        }
       }
       if (el !== mine) return;
       seed = crypto.getRandomValues(new Uint32Array(2));
