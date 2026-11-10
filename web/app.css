@@ -507,6 +507,7 @@ kbd {
 }
 
 [data-tip]::after {
+  display: none;
   content: attr(data-tip);
   position: absolute;
   bottom: calc(100% + 6px);
@@ -527,6 +528,7 @@ kbd {
 }
 
 [data-tip]:hover::after {
+  display: block;
   opacity: 1;
   transform: none;
   transition-delay: 60ms;
@@ -1330,6 +1332,16 @@ td.date a {
   }
   .result {
     grid-template-columns: 1fr;
+  }
+  /* Wrapped statistics can sit against either edge on a phone. Keep their
+     exact values inside the viewport, clear of the value being read. */
+  [data-tip]::after {
+    position: fixed;
+    bottom: 1rem;
+    left: 1rem;
+    width: max-content;
+    max-width: calc(100vw - 2rem);
+    white-space: normal;
   }
 }
 

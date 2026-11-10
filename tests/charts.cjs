@@ -128,6 +128,19 @@ async function run() {
       await page.locator('.chart-box svg').focus();
       await page.keyboard.press('Home');
       assert.doesNotMatch(await page.locator('.tip').innerText(), /raw|burst|errors/);
+      // Exact-value tooltips must not widen a result page while hidden or
+      // while reading a statistic at the right edge of a wrapped row.
+      for (const width of [1440, 768, 600, 390, 320]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await page.mouse.move(0, 0);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `hidden statistic tooltip at ${width}`);
+        for (const metric of await page.locator('[data-tip]').all()) {
+          await metric.hover();
+          assert.equal(await metric.evaluate(el => getComputedStyle(el, '::after').display !== 'none'), true);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `visible statistic tooltip at ${width}`);
+        }
+      }
+      await page.setViewportSize({ width: 1280, height: 1000 });
       await page.goto(base + '/history');
       for (const chart of ['pace', 'calendar']) {
         const box = page.locator(`[data-chart="${chart}"]`);
