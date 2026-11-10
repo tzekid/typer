@@ -5,7 +5,7 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { once } = require('node:events');
 const net = require('node:net');
-const { chromium } = require('playwright');
+const browserType = require('playwright')[process.env.TEST_BROWSER || 'chromium'];
 const { start } = require('./charts.cjs');
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -17,7 +17,7 @@ async function run() {
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const { server, base } = await start(path.join(project, 'build/typer'), path.join(project, 'build/packs'), data, port);
-  const browser = await chromium.launch({ headless: true });
+  const browser = process.env.BROWSER_WS_ENDPOINT ? await browserType.connect(process.env.BROWSER_WS_ENDPOINT) : await browserType.launch({ headless: true });
   const failures = [];
   async function check(name, test) {
     const context = await browser.newContext();

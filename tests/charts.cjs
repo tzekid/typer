@@ -81,7 +81,7 @@ async function run() {
   try {
     const fixture = await seed(base, data);
     for (const name of [browserName]) {
-      browser = await browserType.launch({ headless: true });
+      browser = process.env.BROWSER_WS_ENDPOINT ? await browserType.connect(process.env.BROWSER_WS_ENDPOINT) : await browserType.launch({ headless: true });
       const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, colorScheme: 'dark' });
       await context.addCookies([{ name: 'typer_id', value: fixture.cookie.split('=')[1], url: base }]);
       const page = await context.newPage();

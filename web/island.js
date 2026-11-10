@@ -22,7 +22,7 @@
     const css = getComputedStyle(document.documentElement);
     return colorNames.map((n) => css.getPropertyValue(n).trim());
   };
-  let colors = readColors();
+  let colors = [];
 
   // Text is measured on a canvas of its own, so layout works before a mount.
   const measurer = document.createElement("canvas").getContext("2d");
@@ -259,6 +259,9 @@
         el.clip.style.height = `${lineH * 3}px`;
         el.lines.style.top = `${-lineH}px`;
         size();
+        // WebKit can return empty custom properties during script startup.
+        // Read the palette after the mounted page has been laid out.
+        colors = readColors();
         ex.mt_resize(cssWidth);
         return restart(false, fade);
       })

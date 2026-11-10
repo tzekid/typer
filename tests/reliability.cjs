@@ -8,7 +8,7 @@ const net = require('node:net');
 const { once } = require('node:events');
 const { DatabaseSync } = require('node:sqlite');
 const { record } = require('./charts.cjs');
-const { chromium } = require('playwright');
+const browserType = require('playwright')[process.env.TEST_BROWSER || 'chromium'];
 
 async function run() {
   const project = path.resolve(__dirname, '..');
@@ -62,7 +62,7 @@ async function run() {
       assert.equal(retry.headers.get('location'), first.headers.get('location'));
       assert.equal((await fetch(base + first.headers.get('location'))).status, 200);
     });
-    browser = await chromium.launch({ headless: true });
+    browser = process.env.BROWSER_WS_ENDPOINT ? await browserType.connect(process.env.BROWSER_WS_ENDPOINT) : await browserType.launch({ headless: true });
     await check('offline finished test saves on reconnect without navigation', async () => {
       const context = await browser.newContext();
       try {
