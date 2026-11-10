@@ -345,7 +345,7 @@ respond :: proc(c: ^Conn) {
 	fmt.printfln(
 		"event=request method=%s path=%s status=%d bytes=%d micros=%.0f",
 		c.req.method,
-		c.req.path,
+		"/key/[redacted]" if strings.has_prefix(c.req.path, "/key/") else c.req.path,
 		c.res.status,
 		len(c.res.body),
 		time.duration_microseconds(time.tick_since(started)),

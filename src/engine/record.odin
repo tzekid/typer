@@ -223,6 +223,11 @@ record_replay :: proc(t: ^Test, events: []Raw_Event) -> bool {
 			if !test_before_delete(t) {
 				return false
 			}
+		case .Time_Up:
+			// Only a timed test can end before its target has been typed.
+			if t.cfg.mode != .Time || t.phase != .Active {
+				return false
+			}
 		}
 		test_apply(t, e)
 	}

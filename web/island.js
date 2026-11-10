@@ -111,6 +111,7 @@
   };
   const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
   let flushing = false;
+  let retryTimer = 0;
 
   function enqueue(record) {
     const box = readOutbox();
@@ -121,7 +122,9 @@
 
   async function flush() {
     if (flushing) return;
+    clearTimeout(retryTimer);
     flushing = true;
+    let retry = false;
     try {
       for (;;) {
         const box = readOutbox();
@@ -137,7 +140,10 @@
         });
         // Rate limits and server trouble pass: keep the record for later. Any
         // other refusal is final, and must not hold back the records after it.
-        if (res.status === 429 || res.status >= 500) break;
+        if (res.status === 429 || res.status >= 500) {
+          retry = true;
+          break;
+        }
         // By value: another tab may have flushed the same outbox meanwhile.
         const rest = readOutbox();
         const at = rest.indexOf(box[0]);
@@ -151,8 +157,10 @@
       }
     } catch (_) {
       // offline or server restarting: the outbox keeps the record
+      retry = true;
     } finally {
       flushing = false;
+      if (retry) retryTimer = setTimeout(flush, 5000);
     }
   }
 
@@ -708,6 +716,7 @@
     if (e.persisted) repaint();
   });
   addEventListener("pagehide", flush);
+  addEventListener("online", flush);
   addEventListener("typer:theme", () => {
     colors = readColors();
     if (el === null || ex === null) return;
@@ -719,4 +728,5 @@
 
   // This page may be the test; if not, warm up so the test opens drawn.
   if (!mount(document.querySelector("main"), true)) addEventListener("load", () => setTimeout(boot, 300));
+  flush();
 })();
