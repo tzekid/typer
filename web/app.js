@@ -3,7 +3,7 @@
 // - in-place navigation: links and forms fetch the next page and swap in its
 //   <header> and <main>, so nothing reloads and the island keeps running;
 // - settings that save as they change, copy buttons, the language filter;
-// - the result chart's hover readout and series toggles.
+// - chart readouts for pointer, touch and keyboard, and result series toggles.
 // Without script, all of it still works as plain links and forms.
 (() => {
   "use strict";
@@ -124,6 +124,7 @@
   }
 
   function swap(doc, y) {
+    leave();
     const before = document.querySelector("main");
     const main = doc.querySelector("main");
     // DOMParser parses as if script were off: drop what is only for that.
@@ -131,6 +132,7 @@
     window.typer?.unmount();
     document.querySelector("header.top").replaceWith(doc.querySelector("header.top"));
     before.replaceWith(main);
+    initCharts(main);
     document.title = doc.title;
     scrollTo(0, y);
     if (!window.typer?.mount(main)) (main.querySelector("[autofocus]") || main).focus({ preventScroll: true });
@@ -199,7 +201,7 @@
     first?.querySelector("a")?.click();
   });
 
-  // ------ result chart: per-second readout on hover, series toggles
+  // ------ charts: one readout style, using each plot's rendered points
 
   const HIDDEN = "typer:chart-hidden";
   const off = new Set((localStorage.getItem(HIDDEN) || "").split(" ").filter(Boolean));
@@ -213,6 +215,7 @@
     if (!off.delete(s)) off.add(s);
     localStorage.setItem(HIDDEN, [...off].join(" "));
     showSeries();
+    if (hovered?.box === button.closest(".chart-box")) showPoint(hovered, hovered.index);
   });
 
   const SERIES = [
@@ -221,55 +224,227 @@
     ["burst", "burst"],
     ["err", "errors"],
   ];
+  const charts = new WeakMap();
   let hovered = null;
+  let tipId = 0;
 
-  function readout(box, e) {
-    const svg = box.querySelector("svg");
-    const line = svg.querySelector("polyline.wpm").points;
-    const n = line.numberOfItems;
+  function initCharts(scope) {
+    for (const svg of scope.querySelectorAll(".chart-box svg")) {
+      if (charts.has(svg)) continue;
+      const box = svg.closest(".chart-box");
+      const result = box.dataset.chart === "result";
+      let points;
+      if (result) {
+        points = [...svg.querySelector("polyline.wpm").points].map((p, i) => ({ x: p.x, y: p.y, data: { label: `Second ${i + 1}` } }));
+      } else {
+        // A personal-best diamond can coincide with a sampled test dot.
+        const unique = new Map();
+        for (const el of svg.querySelectorAll("[data-chart-point]")) {
+          el.querySelector("title")?.remove(); // native titles remain without JS
+          const rect = el.getBBox();
+          unique.set(el.dataset.order ?? unique.size, { el, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, data: el.dataset });
+        }
+        points = [...unique.values()];
+        if (box.dataset.chart === "history") points.sort((a, b) => Number(a.data.order) - Number(b.data.order));
+        const overlay = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        overlay.setAttribute("class", "chart-hover");
+        overlay.setAttribute("aria-hidden", "true");
+        if (box.dataset.chart === "history") overlay.innerHTML = '<line class="guide" y1="33" y2="225"/>';
+        overlay.innerHTML += '<circle class="chart-selection" r="6"/>';
+        svg.append(overlay);
+      }
+      if (!points.length) continue;
+      let tip = box.querySelector(".tip");
+      if (!tip) {
+        tip = document.createElement("div");
+        tip.className = "tip";
+        box.append(tip);
+      }
+      if (!tip.id) tip.id = `chart-tip-${++tipId}`;
+      tip.setAttribute("role", "status");
+      tip.setAttribute("aria-atomic", "true");
+      tip.setAttribute("aria-hidden", "true");
+      svg.setAttribute("tabindex", "0");
+      svg.setAttribute("role", "group");
+      svg.setAttribute("aria-describedby", `${svg.getAttribute("aria-describedby") || ""} ${tip.id}`.trim());
+      svg.setAttribute("aria-description", "Use arrow keys to explore, Home or End to jump, and Escape to close." + (box.dataset.chart === "history" ? " Enter opens the selected test." : ""));
+      for (const a of svg.querySelectorAll("a")) a.setAttribute("tabindex", "-1");
+      charts.set(svg, { svg, box, tip, points, result, measured: result || svg.getClientRects().length > 0, index: 0, values: result ? Object.fromEntries(SERIES.map(([key]) => [key, box.dataset[key].split(",")])) : null });
+    }
+  }
+
+  function row(tip, label, value, series) {
+    const item = document.createElement("span");
+    item.className = "tip-row";
+    if (series) {
+      const swatch = document.createElement("i");
+      swatch.className = `swatch ${series}`;
+      item.append(swatch);
+    }
+    item.append(document.createTextNode(label));
+    const number = document.createElement("em");
+    number.textContent = value;
+    item.append(number);
+    tip.append(item);
+  }
+
+  function showPoint(state, index, keyboard = false) {
+    measureChart(state);
+    const { svg, box, tip, points, result } = state;
+    const point = points[index];
+    if (hovered !== state) leave();
+    state.keyboard = keyboard;
+    const changed = hovered !== state || state.index !== index || state.hiddenSeries !== root.dataset.chartHidden;
+    state.hiddenSeries = root.dataset.chartHidden;
+    points[state.index].el?.classList.remove("chart-point-active");
+    state.index = index;
+    point.el?.classList.add("chart-point-active");
     const m = svg.getScreenCTM();
-    if (!m || n === 0) return;
-    const x = (e.clientX - m.e) / m.a;
-    const first = line.getItem(0).x;
-    const span = line.getItem(n - 1).x - first;
-    const i = n === 1 ? 0 : Math.max(0, Math.min(n - 1, Math.round(((x - first) / span) * (n - 1))));
-    const at = line.getItem(i).x;
+    if (!m) return;
+    tip.setAttribute("aria-live", keyboard ? "polite" : "off");
+    if (changed) {
+      tip.replaceChildren();
+      const title = document.createElement("b");
+      title.textContent = point.data.label;
+      tip.append(title);
+      const value = document.createElement("strong");
+      value.className = "tip-value";
+      if (box.dataset.chart === "calendar") {
+        const seconds = Number(point.data.seconds);
+        value.textContent = seconds === 0 ? "No practice" : seconds < 60 ? `${Number(seconds.toFixed(1))} s` : `${Number((seconds / 60).toFixed(1))} min`;
+        tip.append(value);
+      } else {
+        value.append(document.createTextNode(result ? state.values.wpm[index] : point.data.wpm));
+        const unit = document.createElement("small");
+        unit.textContent = "wpm";
+        value.append(unit);
+        tip.append(value);
+        if (result) {
+          for (const [key, label] of SERIES.slice(1)) {
+            if (!off.has(key)) row(tip, label, state.values[key][index], key);
+          }
+        } else {
+          row(tip, "Accuracy", `${point.data.acc}%`);
+          if (point.data.average) row(tip, `Average (${point.data.count} ${point.data.count === "1" ? "test" : "tests"})`, `${point.data.average} wpm`, "wpm");
+          if ("best" in point.data) {
+            const best = document.createElement("p");
+            best.className = "tip-best";
+            best.textContent = "New personal best";
+            tip.append(best);
+          }
+        }
+      }
+    }
     const guide = svg.querySelector(".guide");
-    guide.setAttribute("x1", at);
-    guide.setAttribute("x2", at);
-    for (const dot of svg.querySelectorAll(".dot")) {
-      const s = dot.classList[1];
-      dot.setAttribute("cx", at);
-      dot.setAttribute("cy", svg.querySelector(`polyline.${s}`).points.getItem(i).y);
+    guide?.setAttribute("x1", point.x);
+    guide?.setAttribute("x2", point.x);
+    if (result) {
+      for (const dot of svg.querySelectorAll(".dot")) {
+        const key = dot.classList[1];
+        dot.setAttribute("cx", point.x);
+        dot.setAttribute("cy", svg.querySelector(`polyline.${key}`).points.getItem(index).y);
+      }
+    } else {
+      const ring = svg.querySelector(".chart-selection");
+      ring.setAttribute("cx", point.x);
+      ring.setAttribute("cy", point.y);
     }
-    let html = `<b>${i + 1} s</b>`;
-    for (const [key, label] of SERIES) {
-      if (off.has(key)) continue;
-      const v = Number((box.dataset[key] || "").split(",")[i] || 0);
-      html += `<span><i class="swatch ${key}"></i>${label}<em>${v}</em></span>`;
-    }
-    const tip = box.querySelector(".tip");
-    tip.innerHTML = html;
-    const left = m.a * at + m.e - box.getBoundingClientRect().left;
-    const w = tip.offsetWidth;
-    tip.style.transform = `translateX(${left + 16 + w > box.clientWidth ? left - 16 - w : left + 16}px)`;
+    const anchor = new DOMPoint(point.x, point.y).matrixTransform(m);
+    const rect = box.getBoundingClientRect();
+    const plot = svg.getBoundingClientRect();
     box.classList.add("hovering");
-    hovered = box;
+    const width = tip.offsetWidth, height = tip.offsetHeight;
+    let left = anchor.x + 18;
+    if (left + width > Math.min(rect.right, innerWidth - 12)) left = anchor.x - width - 18;
+    left = Math.max(12, Math.min(left, innerWidth - width - 12));
+    let top = anchor.y - height - 16;
+    if (top < plot.top + 8) top = anchor.y + 16;
+    top = Math.max(12, Math.min(top, plot.bottom - height - 8, innerHeight - height - 12));
+    tip.style.transform = `translate(${left - rect.left}px, ${top - rect.top}px)`;
+    tip.setAttribute("aria-hidden", "false");
+    svg.classList.add("chart-active");
+    box.classList.add("hovering");
+    hovered = state;
   }
 
   function leave() {
-    hovered?.classList.remove("hovering");
+    if (!hovered) return;
+    hovered.points[hovered.index].el?.classList.remove("chart-point-active");
+    hovered.svg.classList.remove("chart-active");
+    hovered.box.classList.remove("hovering");
+    hovered.tip.setAttribute("aria-hidden", "true");
     hovered = null;
+  }
+
+  function measureChart(state) {
+    if (state.measured) return;
+    for (const point of state.points) {
+      const rect = point.el.getBBox();
+      point.x = rect.x + rect.width / 2;
+      point.y = rect.y + rect.height / 2;
+    }
+    state.measured = true;
   }
 
   for (const type of ["pointermove", "pointerdown"]) {
     document.addEventListener(type, (e) => {
-      const box = e.target.closest?.(".chart-box");
-      if (box && !e.target.closest(".legend")) readout(box, e);
-      else if (hovered) leave();
+      if (hovered?.tip.contains(e.target)) return;
+      const svg = e.target.closest?.(".chart-box svg");
+      const state = charts.get(svg);
+      if (!state) {
+        if (type === "pointerdown" || !hovered?.keyboard) leave();
+        return;
+      }
+      if (type === "pointerdown" && e.pointerType === "touch") e.preventDefault();
+      measureChart(state);
+      const m = svg.getScreenCTM();
+      if (!m) return;
+      const at = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+      let index = 0, distance = Infinity;
+      for (const [i, point] of state.points.entries()) {
+        const d = (point.x - at.x) ** 2 + (state.result ? 0 : (point.y - at.y) ** 2);
+        if (d < distance) { index = i; distance = d; }
+      }
+      showPoint(state, index);
     });
   }
   document.addEventListener("pointerout", (e) => {
-    if (!e.relatedTarget) leave();
+    if (e.pointerType !== "touch" && hovered && !hovered.keyboard &&
+        (hovered.svg.contains(e.target) || hovered.tip.contains(e.target)) &&
+        !hovered.svg.contains(e.relatedTarget) && !hovered.tip.contains(e.relatedTarget)) leave();
   });
+  // A tap leaves the readout open; tapping a tiny linked mark should not
+  // navigate away before its values can be read.
+  document.addEventListener("click", (e) => {
+    if (e.pointerType === "touch" && e.target.closest?.(".chart-box svg")) e.preventDefault();
+  }, true);
+  document.addEventListener("pointercancel", leave);
+  document.addEventListener("focusin", (e) => {
+    const state = charts.get(e.target);
+    if (state) showPoint(state, state.index, true);
+    else leave();
+  });
+  document.addEventListener("focusout", (e) => {
+    if (hovered?.svg === e.target) leave();
+  });
+  document.addEventListener("keydown", (e) => {
+    const state = charts.get(e.target);
+    if (e.key === "Escape") return leave();
+    if (!state) return;
+    let index = state.index;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") index++;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") index--;
+    else if (e.key === "Home") index = 0;
+    else if (e.key === "End") index = state.points.length - 1;
+    else if (e.key === "Enter") {
+      state.points[index].el?.closest("a")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return;
+    } else return;
+    e.preventDefault();
+    showPoint(state, Math.max(0, Math.min(index, state.points.length - 1)), true);
+  });
+  addEventListener("resize", leave);
+  addEventListener("blur", leave);
+  document.addEventListener("typer:result", (e) => initCharts(e.detail));
+  initCharts(document);
 })();

@@ -476,6 +476,7 @@
   function showResult(html) {
     if (el === null) return;
     el.result.innerHTML = html;
+    document.dispatchEvent(new CustomEvent("typer:result", { detail: el.result }));
     el.result.hidden = false;
     el.after.hidden = false;
     el.clip.hidden = true;
@@ -671,6 +672,7 @@
   // and Escape repeats this one, wherever the focus is.
   document.addEventListener("keydown", (e) => {
     if (el === null || ex === null || document.activeElement === el.input) return;
+    if (e.target.closest(".chart-box")) return;
     if (e.key === "Tab") {
       e.preventDefault();
       onTab();

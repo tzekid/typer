@@ -186,7 +186,7 @@ render_chart :: proc(b: ^strings.Builder, r: Result) {
 		strings.write_byte(b, '"')
 	}
 
-	strings.write_string(b, `<figure class="chart-box" data-top="`)
+	strings.write_string(b, `<figure class="chart-box" data-chart="result" data-top="`)
 	write_fixed(b, top, 0)
 	strings.write_string(b, `" data-err-top="`)
 	write_fixed(b, err_top, 0)

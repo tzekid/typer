@@ -204,10 +204,28 @@ history_svg_num :: proc(b: ^strings.Builder, value: f64) {
 }
 
 render_history_progress :: proc(b: ^strings.Builder, g: ^History_Group) {
-	w(b, `<figure class="history-trajectory">`)
+	w(b, `<figure class="history-trajectory chart-box" data-chart="history">`)
 	render_history_progress_plot(b, g, 960)
 	render_history_progress_plot(b, g, 360)
 	w(b, `<figcaption><span><i class="history-dot-key"></i>One test</span><span><i class="history-line-key"></i>Average of up to 10 tests</span><span><i class="history-best-key"></i>New personal best</span></figcaption></figure>`)
+}
+
+history_progress_point_data :: proc(b: ^strings.Builder, rows: []Stored, idx: int, best: bool = false) {
+	s := rows[idx]
+	w(b, ` data-chart-point data-order="`)
+	strings.write_int(b, idx)
+	w(b, `" data-label="`)
+	write_date(b, s.created_at)
+	w(b, ` UTC" data-wpm="`)
+	history_number(b, s.wpm, 2)
+	w(b, `" data-acc="`)
+	history_number(b, s.acc, 2)
+	w(b, `" data-average="`)
+	history_number(b, history_mean(rows[max(0, idx - 9):idx + 1]), 2)
+	w(b, `" data-count="`)
+	strings.write_int(b, min(10, idx + 1))
+	w(b, `"`)
+	if best do w(b, ` data-best`)
 }
 
 render_history_progress_plot :: proc(b: ^strings.Builder, g: ^History_Group, width: int) {
@@ -272,17 +290,21 @@ render_history_progress_plot :: proc(b: ^strings.Builder, g: ^History_Group, wid
 	for i in 0 ..< dots {
 		idx := i * (n - 1) / max(1, dots - 1)
 		s := rows[idx]
-		w(b, `<circle cx="`)
+		w(b, `<a href="/results/`)
+		strings.write_i64(b, s.id)
+		w(b, `"><circle cx="`)
 		history_svg_num(b, x_of(s, first, last, width))
 		w(b, `" cy="`)
 		history_svg_num(b, y_of(s.wpm, bottom, top))
-		w(b, `" r="3"><title>`)
+		w(b, `" r="3"`)
+		history_progress_point_data(b, rows, idx)
+		w(b, `><title>`)
 		write_date(b, s.created_at)
 		w(b, ` UTC, `)
 		history_number(b, s.wpm, 2)
 		w(b, ` wpm, `)
 		history_number(b, s.acc, 2)
-		w(b, `% accuracy</title></circle>`)
+		w(b, `% accuracy</title></circle></a>`)
 	}
 	w(b, `</g><polyline class="history-trend" points="`)
 	points := min(160, n)
@@ -294,7 +316,9 @@ render_history_progress_plot :: proc(b: ^strings.Builder, g: ^History_Group, wid
 		history_svg_num(b, y_of(history_mean(rows[max(0, idx - 9):idx + 1]), bottom, top))
 	}
 	w(b, `"/><g class="history-best-marks">`)
+	record_idx := 0
 	for s in g.records {
+		for rows[record_idx].id != s.id do record_idx += 1
 		x, y := x_of(s, first, last, width), y_of(s.wpm, bottom, top)
 		w(b, `<a href="/results/`)
 		strings.write_i64(b, s.id)
@@ -306,7 +330,9 @@ render_history_progress_plot :: proc(b: ^strings.Builder, g: ^History_Group, wid
 		history_svg_num(b, x)
 		w(b, " ")
 		history_svg_num(b, y - 5)
-		w(b, `l5 5 -5 5 -5 -5Z"><title>New personal best: `)
+		w(b, `l5 5 -5 5 -5 -5Z"`)
+		history_progress_point_data(b, rows, record_idx, true)
+		w(b, `><title>New personal best: `)
 		history_number(b, s.wpm)
 		w(b, ` wpm, `)
 		write_date(b, s.created_at)
@@ -490,7 +516,7 @@ render_history_pace :: proc(b: ^strings.Builder, g: ^History_Group) {
 	if g.pace_tests < 5 do return
 	w(b, `<section class="history-pace"><h2>Through a test</h2><p class="history-caption">`)
 	strings.write_int(b, g.pace_tests)
-	w(b, ` tests of 30 seconds or longer.</p><figure><svg viewBox="0 0 330 122" role="img" aria-labelledby="pace-title" aria-describedby="pace-values"><title id="pace-title">Correct insertion speed and accuracy by third of a test</title>`)
+	w(b, ` tests of 30 seconds or longer.</p><figure class="chart-box" data-chart="pace"><svg viewBox="0 0 330 122" role="img" aria-labelledby="pace-title" aria-describedby="pace-values"><title id="pace-title">Correct insertion speed and accuracy by third of a test</title>`)
 	speeds: [3]f64
 	top := 20.0
 	for n, i in g.thirds {
@@ -517,7 +543,13 @@ render_history_pace :: proc(b: ^strings.Builder, g: ^History_Group) {
 		history_svg_num(b, 76 - height)
 		w(b, `" width="62" height="`)
 		history_svg_num(b, height)
-		w(b, `" rx="3"/><text x="`)
+		w(b, `" rx="3" data-chart-point data-label="`)
+		w(b, labels[i])
+		w(b, `" data-wpm="`)
+		history_number(b, speed, 2)
+		w(b, `" data-acc="`)
+		history_number(b, 100 * (1 - f64(g.errors[i]) / f64(g.thirds[i])), 2)
+		w(b, `"/><text x="`)
 		history_svg_num(b, x + 31)
 		w(b, `" y="`)
 		history_svg_num(b, 67 - height)
@@ -605,7 +637,7 @@ render_history_practice :: proc(b: ^strings.Builder, h: ^History) {
 				if i > 0 do bound = max(bound, bounds[i - 1] + 30)
 			}
 		}
-		w(b, `<figure>`)
+		w(b, `<figure class="chart-box" data-chart="calendar">`)
 		render_history_calendar_plot(b, seconds, bounds, first, false)
 		render_history_calendar_plot(b, seconds, bounds, first, true)
 		w(b, `<figcaption class="history-calendar-legend"><span>Minutes per day</span><span><i class="practice-level-0"></i>0</span>`)
@@ -651,7 +683,9 @@ render_history_calendar_plot :: proc(b: ^strings.Builder, seconds: [84]f64, boun
 		w(b, `" height="14" rx="2" class="practice-level-`)
 		level := 0 if duration == 0 else 1 if duration <= bounds[0] else 2 if duration <= bounds[1] else 3 if duration <= bounds[2] else 4
 		strings.write_int(b, level)
-		w(b, `" data-seconds="`)
+		w(b, `" data-chart-point data-label="`)
+		write_day(b, (first + i64(i)) * DAY_MS)
+		w(b, ` UTC" data-seconds="`)
 		history_number(b, duration, 2)
 		w(b, `"><title>`)
 		write_day(b, (first + i64(i)) * DAY_MS)

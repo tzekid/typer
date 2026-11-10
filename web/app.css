@@ -697,20 +697,22 @@ kbd {
   position: absolute;
   top: 0;
   left: 0;
-  display: grid;
-  gap: 0.2rem;
-  min-width: 8rem;
-  padding: 0.5rem 0.7rem;
+  display: none;
+  z-index: 5;
+  gap: 0.45rem;
+  min-width: 14rem;
+  max-width: calc(100vw - 1.5rem);
+  padding: 0.8rem 1rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow);
   color: var(--text);
-  font-size: 0.76rem;
+  font: 0.72rem/1.5 var(--mono);
   white-space: nowrap;
-  pointer-events: none;
+  pointer-events: auto;
   opacity: 0;
-  transition: opacity 120ms var(--ease), transform 70ms linear;
+  transition: opacity 120ms var(--ease);
 }
 
 .chart-box.hovering .hover,
@@ -718,15 +720,17 @@ kbd {
   opacity: 1;
 }
 
+.chart-box.hovering .tip {
+  display: grid;
+}
+
 .tip b {
   color: var(--sub);
   font-size: 0.68rem;
   font-weight: normal;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
-.tip span {
+.tip .tip-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -737,6 +741,59 @@ kbd {
   padding-left: 1rem;
   font: 0.8rem var(--mono);
   font-style: normal;
+}
+
+.tip-value {
+  color: var(--main);
+  font-size: 1.6rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.tip-value small {
+  margin-left: 0.4rem;
+  color: var(--sub);
+  font-size: 0.72rem;
+}
+
+.tip .tip-best {
+  margin: 0.15rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--rule);
+  color: var(--main);
+  font-size: 0.68rem;
+}
+
+.chart-hover {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chart-active .chart-hover {
+  opacity: 1;
+}
+
+.chart-hover .guide {
+  stroke: var(--sub);
+  stroke-opacity: 0.5;
+  stroke-dasharray: 3 4;
+}
+
+.chart-selection {
+  fill: var(--bg);
+  fill-opacity: 0.7;
+  stroke: var(--main);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+[data-chart-point].chart-point-active {
+  fill: var(--main);
+  opacity: 1;
+}
+
+.chart-box svg:focus-visible {
+  outline-offset: 6px;
 }
 
 /* series toggles, shown while the chart is hovered */
