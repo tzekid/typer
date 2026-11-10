@@ -6,6 +6,7 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { once } = require('node:events');
+const { DatabaseSync } = require('node:sqlite');
 const { record } = require('./charts.cjs');
 const { chromium } = require('playwright');
 
@@ -94,6 +95,72 @@ async function run() {
         await page.waitForFunction(() => JSON.parse(localStorage.getItem('typer:outbox') || '[]').length === 0, null, { timeout: 10000 });
         assert.equal(requests, 2);
       } finally { await context.close(); }
+    });
+    await check('two fresh tabs share one upload and one typist', async () => {
+      const context = await browser.newContext();
+      let release;
+      const gate = new Promise(resolve => { release = resolve; });
+      let requests = 0;
+      const pending = [];
+      const db = new DatabaseSync(path.join(data, 'typer.sqlite'));
+      const usersBefore = db.prepare('SELECT count(*) AS n FROM users').get().n;
+      try {
+        const first = await context.newPage();
+        await first.goto(base + '/history');
+        await first.evaluate(body => localStorage.setItem('typer:outbox', JSON.stringify([body])), record(505).toString('base64'));
+        await context.route('**/results', route => {
+          requests++;
+          const task = (async () => { await gate; await route.continue(); })();
+          pending.push(task);
+          return task;
+        });
+        await first.reload();
+        const second = await context.newPage();
+        await second.goto(base + '/history');
+        await first.waitForTimeout(250);
+        release(); await Promise.all(pending);
+        await first.waitForFunction(() => JSON.parse(localStorage.getItem('typer:outbox') || '[]').length === 0);
+        await first.waitForTimeout(100);
+        assert.equal(requests, 1, 'both tabs uploaded the same pending result without an identity');
+        assert.equal(db.prepare('SELECT count(*) AS n FROM users').get().n, usersBefore + 1);
+        await second.reload();
+        assert.equal(await second.locator('a[href^="/results/"]').count() > 0, true);
+      } finally { release(); await Promise.allSettled(pending); db.close(); await context.close(); }
+    });
+    await check('another tab can finish while an upload waits and receives its own link', async () => {
+      const context = await browser.newContext();
+      let release, started;
+      const gate = new Promise(resolve => { release = resolve; });
+      const uploading = new Promise(resolve => { started = resolve; });
+      const pending = [];
+      const db = new DatabaseSync(path.join(data, 'typer.sqlite'));
+      const usersBefore = db.prepare('SELECT count(*) AS n FROM users').get().n;
+      const resultsBefore = db.prepare('SELECT count(*) AS n FROM results').get().n;
+      try {
+        const first = await context.newPage();
+        await first.goto(base + '/history');
+        const second = await context.newPage();
+        await second.goto(base + '/?mode=words&n=10');
+        await second.waitForFunction(() => document.getElementById('words-text')?.textContent.length > 0);
+        await context.route('**/results', route => {
+          const task = (async () => { started(); await gate; await route.continue(); })();
+          pending.push(task); return task;
+        });
+        await first.evaluate(body => {
+          localStorage.setItem('typer:outbox', JSON.stringify([body]));
+          dispatchEvent(new Event('online'));
+        }, record(506).toString('base64'));
+        await uploading;
+        await second.keyboard.type(await second.locator('#words-text').textContent(), { delay: 40 });
+        await second.waitForFunction(() => JSON.parse(localStorage.getItem('typer:outbox') || '[]').length === 2);
+        release();
+        await second.waitForFunction(() => JSON.parse(localStorage.getItem('typer:outbox') || '[]').length === 0);
+        await second.locator('[data-result-link]:visible').waitFor();
+        const latest = db.prepare('SELECT max(id) AS id FROM results').get().id;
+        assert.equal(await second.locator('[data-result-link]').getAttribute('href'), '/results/' + latest);
+        assert.equal(db.prepare('SELECT count(*) AS n FROM results').get().n, resultsBefore + 2);
+        assert.equal(db.prepare('SELECT count(*) AS n FROM users').get().n, usersBefore + 1);
+      } finally { release(); await Promise.allSettled(pending); db.close(); await context.close(); }
     });
     assert.deepEqual(failures, []);
   } finally {

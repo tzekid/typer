@@ -122,11 +122,26 @@
   const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
   let flushing = false;
   let retryTimer = 0;
+  let displayedRecord = null;
+  const resultChannel = new BroadcastChannel("typer:results");
 
-  function enqueue(record) {
-    const box = readOutbox();
-    box.push(toB64(record));
-    localStorage.setItem(OUTBOX, JSON.stringify(box));
+  function savedResult({ record, location }) {
+    if (record === displayedRecord && location && el && !el.result.hidden) {
+      el.link.href = location;
+      el.link.hidden = false;
+    }
+  }
+  resultChannel.onmessage = event => savedResult(event.data);
+
+  async function enqueue(record) {
+    const encoded = toB64(record);
+    displayedRecord = encoded;
+    // Keep storage updates short; an upload never blocks a new local save.
+    await navigator.locks.request(OUTBOX, () => {
+      const box = readOutbox();
+      box.push(encoded);
+      localStorage.setItem(OUTBOX, JSON.stringify(box));
+    });
     flush();
   }
 
@@ -136,41 +151,48 @@
     flushing = true;
     let retry = false;
     try {
-      for (;;) {
-        const box = readOutbox();
-        if (box.length === 0) break;
-        const body = fromB64(box[0]);
-        // keepalive lets a page being left finish the upload, but browsers
-        // refuse keepalive bodies over 64 KiB (long tests, long quotes).
-        const res = await fetch("/results", {
-          method: "POST",
-          headers: { "content-type": "application/octet-stream" },
-          body,
-          keepalive: body.length <= 60000,
-        });
-        // Rate limits and server trouble pass: keep the record for later. Any
-        // other refusal is final, and must not hold back the records after it.
-        if (res.status === 429 || res.status >= 500) {
-          retry = true;
-          break;
+      // Only one tab uploads at a time, including the first response that
+      // establishes the browser's identity cookie.
+      await navigator.locks.request("typer:upload", async () => {
+        for (;;) {
+          const box = readOutbox();
+          if (box.length === 0) break;
+          const body = fromB64(box[0]);
+          // keepalive lets a page being left finish the upload, but browsers
+          // refuse keepalive bodies over 64 KiB (long tests, long quotes).
+          const res = await fetch("/results", {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body,
+            keepalive: body.length <= 60000,
+          });
+          // Rate limits and server trouble pass: keep the record for later. Any
+          // other refusal is final, and must not hold back the records after it.
+          if (res.status === 429 || res.status >= 500) {
+            retry = true;
+            break;
+          }
+          await navigator.locks.request(OUTBOX, () => {
+            const rest = readOutbox();
+            const at = rest.indexOf(box[0]);
+            if (at >= 0) rest.splice(at, 1);
+            localStorage.setItem(OUTBOX, JSON.stringify(rest));
+          });
+          const loc = res.headers.get("location");
+          if (res.ok && loc) {
+            const saved = { record: box[0], location: loc };
+            savedResult(saved);
+            resultChannel.postMessage(saved);
+          }
         }
-        // By value: another tab may have flushed the same outbox meanwhile.
-        const rest = readOutbox();
-        const at = rest.indexOf(box[0]);
-        if (at >= 0) rest.splice(at, 1);
-        localStorage.setItem(OUTBOX, JSON.stringify(rest));
-        const loc = res.headers.get("location");
-        if (res.ok && loc && rest.length === 0 && el && !el.result.hidden) {
-          el.link.href = loc;
-          el.link.hidden = false;
-        }
-      }
+      });
     } catch (_) {
       // offline or server restarting: the outbox keeps the record
       retry = true;
     } finally {
       flushing = false;
       if (retry) retryTimer = setTimeout(flush, 5000);
+      else if (readOutbox().length) retryTimer = setTimeout(flush, 0);
     }
   }
 
@@ -472,6 +494,7 @@
     el.result.hidden = true;
     el.after.hidden = true;
     el.link.hidden = true;
+    displayedRecord = null;
     el.clip.hidden = false;
     el.timer.hidden = false;
     el.hint.hidden = false;
