@@ -42,7 +42,7 @@ async function run() {
   try {
     browser = process.env.BROWSER_WS_ENDPOINT ? await browserType.connect(process.env.BROWSER_WS_ENDPOINT) : await browserType.launch({ headless: true });
     for (const colorScheme of ['light', 'dark']) {
-      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, colorScheme, isMobile: true, hasTouch: true });
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, colorScheme, isMobile: name !== 'firefox', hasTouch: true });
       try {
         const page = await context.newPage();
         const errors = []; page.on('pageerror', error => errors.push(error.message));

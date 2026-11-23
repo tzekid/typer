@@ -229,6 +229,7 @@ Test_Page :: struct {
 
 render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	s := t.setup
+	collection := quote_collection(s.language)
 	page_start(b, p, "typer", "test", {"DMMono-latin.woff2", "core.wasm"})
 	// The bar keeps its width whatever the mode: punctuation and numbers dim
 	// for quotes, and every mode's options share one stacked slot.
@@ -265,6 +266,7 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 			x.quotes = QUOTE_ALL
 			mode_link(b, "all", x, here && s.quotes == QUOTE_ALL)
 			for name, g in engine.QUOTE_GROUP_NAMES {
+				if collection != nil && collection.counts[g] == 0 do continue
 				x.quotes = 1 << u32(g)
 				mode_link(b, name, x, here && s.quotes == x.quotes)
 			}

@@ -41,16 +41,66 @@ if [[ "$prior" == "releases/$revision" ]] && systemctl --user is-active --quiet 
   echo "Release $revision is already healthy."
   exit 0
 fi
-rollback() {
-  if [[ -n "$prior" ]]; then
-    ln -s "$prior" "$stage_dir/restore"
-    mv -Tf "$stage_dir/restore" "$release_root/current"
-    systemctl --user restart typer.service
-  fi
-}
-mkdir -p "$HOME/.local/share/typer"
+data_dir="$HOME/.local/share/typer"
+db="$data_dir/typer.sqlite"
+backup=
+mkdir -p "$data_dir"
+if [[ -n "$prior" ]]; then ln -s "$prior" "$stage_dir/restore"; fi
 ln -s "releases/$revision" "$stage_dir/current"
-mv -Tf "$stage_dir/current" "$release_root/current"
+rollback() {
+  [[ -n "$prior" ]] || return 0
+  systemctl --user stop typer.service
+  if [[ -n "$backup" ]]; then
+    # Migrations can change derived scores. A user write after cutover must
+    # never be discarded. Hold the SQLite lock through comparison and restore.
+    if ! ( cd "$backup" && sqlite3 -bail "$db" <<'SQL'
+PRAGMA busy_timeout=5000;
+PRAGMA locking_mode=EXCLUSIVE;
+BEGIN EXCLUSIVE;
+COMMIT;
+ATTACH 'before.sqlite' AS prior;
+CREATE TEMP TABLE unchanged (ok INTEGER CHECK(ok=1));
+INSERT INTO unchanged SELECT
+  (SELECT count(*) FROM main.results) = (SELECT count(*) FROM prior.results)
+  AND NOT EXISTS (
+    SELECT id, user_id, record_sha, created_at FROM main.results EXCEPT
+    SELECT id, user_id, record_sha, created_at FROM prior.results)
+  AND (SELECT count(*) FROM main.users) = (SELECT count(*) FROM prior.users)
+  AND NOT EXISTS (
+    SELECT id, token_sha, name, created_at FROM main.users EXCEPT
+    SELECT id, token_sha, name, created_at FROM prior.users);
+DETACH prior;
+.restore before.sqlite
+SQL
+    ); then
+      echo "Could not safely restore the database. Current data and $backup/before.sqlite are preserved." >&2
+      return 1
+    fi
+  fi
+  mv -Tf "$stage_dir/restore" "$release_root/current"
+  systemctl --user restart typer.service
+}
+if [[ -n "$prior" && -f "$db" ]]; then
+  installed_schema=$(sqlite3 -readonly "$db" 'PRAGMA user_version;')
+  new_schema=$("$release_dir/bin/typer" schema-version)
+  if (( installed_schema > new_schema )); then
+    echo "Database schema $installed_schema is newer than release schema $new_schema." >&2
+    exit 1
+  elif (( installed_schema < new_schema )); then
+    backup=$(mktemp -d "$data_dir/pre-upgrade.XXXXXXXX")
+    systemctl --user stop typer.service
+    if ! ( cd "$backup" && sqlite3 -bail -readonly "$db" '.backup before.sqlite' &&
+           [[ "$(sqlite3 -readonly before.sqlite 'PRAGMA quick_check;')" == ok ]] ); then
+      systemctl --user start typer.service
+      echo "Could not back up the database to $backup." >&2
+      exit 1
+    fi
+  fi
+fi
+if ! mv -Tf "$stage_dir/current" "$release_root/current"; then
+  if [[ -n "$backup" ]]; then systemctl --user start typer.service; fi
+  exit 1
+fi
 if ! systemctl --user restart typer.service; then
   rollback
   exit 1

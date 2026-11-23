@@ -197,7 +197,7 @@ async function run() {
       assert.deepEqual(errors, []);
       await context.close();
 
-      const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'dark' });
+      const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: browserName !== 'firefox', hasTouch: true, colorScheme: 'dark' });
       await touch.addCookies([{ name: 'typer_id', value: fixture.cookie.split('=')[1], url: base }]);
       const phonePage = await touch.newPage();
       await phonePage.goto(base + '/history');

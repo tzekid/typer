@@ -23,6 +23,8 @@ function record(seed, count = 250) {
     if (ex.mt_before_insert(cp)) ex.mt_insert(1000 + i * 29900 / count, cp);
   }
   ex.mt_frame(31000);
+  // A key release already in the browser queue can arrive after the timer frame.
+  ex.mt_key_up(30999, 0);
   ex.mt_frame(31200);
   if (!saved) throw new Error('WASM did not finish the fixture');
   return saved;

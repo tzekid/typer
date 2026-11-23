@@ -36,12 +36,12 @@ jobs:
       - name: Install test browsers
         run: |
           npm install --prefix "$RUNNER_TEMP/browser-tests" playwright@1.61.1
-          "$RUNNER_TEMP/browser-tests/node_modules/.bin/playwright" install --with-deps chromium webkit
+          "$RUNNER_TEMP/browser-tests/node_modules/.bin/playwright" install --with-deps chromium webkit firefox
           echo "NODE_PATH=$RUNNER_TEMP/browser-tests/node_modules" >> "$GITHUB_ENV"
       - name: Test browser flows
         run: |
           failed=0
-          for browser in chromium webkit; do
+          for browser in chromium webkit firefox; do
             export TEST_BROWSER="$browser" CHART_BROWSER="$browser"
             for suite in canvas reliability charts navigation; do
               echo "::group::$browser $suite"

@@ -27,6 +27,19 @@ async function run() {
     finally { release.resolve(); await context.close(); }
   }
   try {
+    await check('a language without medium quotes opens an available quote and remembers it', async context => {
+      const page = await context.newPage();
+      await page.goto(base + '/?mode=quote&q=2&lang=slovak');
+      await page.waitForFunction(() => document.getElementById('words-text')?.textContent.trim());
+      assert.equal(new URL(page.url()).searchParams.get('q'), '15');
+      const lengths = page.locator('nav.bar .set:not([inert]) a');
+      assert.deepEqual(await lengths.allTextContents(), ['all', 'short']);
+      await page.goto(base + '/');
+      await page.waitForFunction(() => document.getElementById('words-text')?.textContent.trim());
+      const config = await page.locator('#typer-config').evaluate(node => JSON.parse(node.textContent));
+      assert.equal(config.language, 'slovak');
+      assert.equal(config.quoteGroups, 15);
+    });
     await check('last settings change survives reordered request delivery', async (context, release) => {
       const first = deferred();
       let posts = 0;

@@ -151,7 +151,7 @@ read_bytes :: proc(r: ^Reader, n: int) -> []u8 {
 
 // Decodes a record into a fresh test (words added, nothing applied yet) and
 // returns its setup and events. Strings and events alias `data` / `allocator`.
-record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (setup: Setup, events: []Raw_Event, ok: bool) {
+record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator, upload := false) -> (setup: Setup, events: []Raw_Event, ok: bool) {
 	r := Reader{data = data, ok = true}
 	magic := string(read_bytes(&r, 4))
 	setup.version = read_u32(&r)
@@ -186,7 +186,7 @@ record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (
 		size := int(read_u32(&r))
 		commit := rune(read_u32(&r))
 		body := read_bytes(&r, size)
-		if !r.ok || !utf8.valid_string(string(body)) || (setup.version >= 2 && size > 1024) || (commit != 0 && commit != ' ' && commit != '\n') {
+		if !r.ok || !utf8.valid_string(string(body)) || ((upload || setup.version >= 2) && size > 1024) || (commit != 0 && commit != ' ' && commit != '\n') {
 			return {}, nil, false
 		}
 		for b in body {
@@ -215,6 +215,12 @@ record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (
 		e.arg = i32(read_u32(&r))
 		if !(abs(e.ms) <= RECORD_MAX_MS) || (setup.version >= 2 && e.ms < previous) || k[1] != 0 || (e.kind == .Insert && !is_scalar(e.arg)) {
 			return {}, nil, false
+		}
+		// Old browser tabs recorded OS events and animation frames on arrival.
+		// Preserve their queued saves and use the same ordering when read back.
+		if setup.version == 1 && e.ms < previous {
+			if upload && previous - e.ms > 150 do return {}, nil, false
+			e.ms = previous
 		}
 		previous = e.ms
 	}
