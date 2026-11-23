@@ -619,12 +619,24 @@
     same &&= seed !== null;
     if (!same) {
       if (cfg.mode === QUOTE) {
+        if (!cfg.quotes.length) {
+          mine.stage.textContent = "No quotes of this length in this language.";
+          mine.hint.hidden = true;
+          return;
+        }
         mine.restarting = true;
         let ready;
         try { ready = await nextQuote(); } finally { mine.restarting = false; }
         if (el !== mine) return;
         if (!ready) {
-          el.stage.textContent = "no quotes of this length here yet";
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.className = "quiet";
+          retry.textContent = "Try again";
+          retry.onclick = () => restart(false);
+          mine.hint.replaceChildren("Could not load the next quote. ", retry);
+          mine.hint.hidden = false;
+          retry.focus();
           return;
         }
       }

@@ -13,21 +13,23 @@ const browserType = require('playwright')[name];
 
 async function painted(page) {
   await page.waitForFunction(() => document.getElementById('words-text')?.textContent.length > 0);
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  const pixels = await page.locator('#words').evaluate(canvas => {
+  await page.waitForFunction(() => {
+    const canvas = document.getElementById('words');
+    if (!canvas?.width || !canvas.height) return false;
     const probe = document.createElement('canvas').getContext('2d');
     probe.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     probe.fillRect(0, 0, 1, 1);
     const expected = [...probe.getImageData(0, 0, 1, 1).data];
     const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    if (!expected.every((v, i) => data[i] === v)) return false;
     let ink = 0;
     for (let i = 0; i < data.length; i += 4) {
-      if (Math.abs(data[i] - expected[0]) + Math.abs(data[i + 1] - expected[1]) + Math.abs(data[i + 2] - expected[2]) > 40) ink++;
+      const contrast = Math.abs(data[i] - expected[0]) + Math.abs(data[i + 1] - expected[1]) + Math.abs(data[i + 2] - expected[2]);
+      if (contrast > 40) ink++;
+      if (ink > 100) return true;
     }
-    return { background: [...data.slice(0, 4)], expected, ink };
-  });
-  assert.deepEqual(pixels.background, pixels.expected, 'canvas background must match the theme');
-  assert(pixels.ink > 100, 'the canvas must contain visible word glyphs');
+    return false;
+  }, null, { timeout: 3000 });
 }
 
 async function run() {
