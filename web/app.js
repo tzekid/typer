@@ -97,13 +97,13 @@
     } else {
       const request = () => load(url.href, { method: "POST", body: data });
       const identity = url.pathname === "/me/forget" || url.pathname === "/key";
-      go(url.href, identity && window.typer ? window.typer.changeIdentity(request) : request(), true);
+      go(url.href, identity && window.typer ? window.typer.changeIdentity(request) : request(), true, "POST");
     }
   });
 
   addEventListener("popstate", () => go(location.href, load(location.href), false));
 
-  async function go(href, page, push) {
+  async function go(href, page, push, method = "GET") {
     const mine = ++latest;
     const slow = setTimeout(() => root.classList.add("loading"), 150);
     try {
@@ -131,7 +131,10 @@
       if (push && new URL(href).hash) document.getElementById(new URL(href).hash.slice(1))?.scrollIntoView();
     } catch (_) {
       // offline or the server is restarting: let the browser say so
-      if (mine === latest) location.assign(href);
+      if (mine === latest) {
+        if (method === "POST") problem("Could not confirm the change. Check your connection and try again.");
+        else location.assign(href);
+      }
     } finally {
       clearTimeout(slow);
       if (mine === latest) root.classList.remove("loading");

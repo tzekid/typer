@@ -490,7 +490,9 @@
     layer.style.transform = `translateY(-${top}px)`;
     const origin = el.lines.getBoundingClientRect();
     const x = point.height ? point.left : w.span.getBoundingClientRect()[cfg.rtl ? "right" : "left"];
-    el.caret.style.transform = `translate(${x - clip.left}px, ${clip.top - origin.top + row * lineH - top}px)`;
+    const caretWidth = parseFloat(getComputedStyle(el.caret).width);
+    const caretLeft = Math.max(0, Math.min(x - clip.left - (cfg.rtl ? caretWidth : 0), clip.width - caretWidth));
+    el.caret.style.transform = `translate(${caretLeft}px, ${clip.top - origin.top + row * lineH - top}px)`;
   }
 
   // The caret glides along a line; to another line it jumps, and when the
@@ -673,10 +675,10 @@
   }
 
   function hint() {
-    el.hint.innerHTML = `<span class="desktop-shortcut">${repeated ? "same words again · " : ""}<kbd>tab</kbd> ${tabs ? "indent · " : "restart · "}<kbd>shift + tab</kbd> leave test</span><button type="button" class="quiet touch-restart">restart</button>`;
+    el.hint.innerHTML = `${repeated ? "Same words again. This score won't count. " : ""}<span class="desktop-shortcut"><kbd>tab</kbd> ${tabs ? "indent · " : "restart · "}<kbd>shift + tab</kbd> leave test</span><button type="button" class="quiet touch-restart">${repeated ? "new words" : "restart"}</button>`;
     const button = el.hint.querySelector("button");
     if (tabs) button.classList.remove("touch-restart");
-    button.onclick = onTab;
+    button.onclick = repeated ? () => restart(false) : onTab;
   }
 
   // Tab restarts a test that has begun with the same text, and deals new
@@ -847,12 +849,14 @@
       typed();
       kick();
     }
-    input.addEventListener("compositionstart", () => {
+    input.addEventListener("compositionstart", e => {
       if (!el?.ready) return;
       composing = true;
-      composition = [];
+      const current = str(ex.mt_input_ptr(), ex.mt_input_len());
+      const replacing = e.data || "";
+      composition = current.endsWith(replacing) ? Array.from(replacing) : [];
       compositionEpoch = el.compositionEpoch;
-      baseLength = Array.from(str(ex.mt_input_ptr(), ex.mt_input_len())).length;
+      baseLength = Array.from(current).length - composition.length;
     });
     input.addEventListener("compositionupdate", e => {
       if (composing) updateComposition(e.data, e.timeStamp, false);
