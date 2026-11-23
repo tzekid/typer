@@ -32,6 +32,44 @@ async function painted(page) {
   }, null, { timeout: 3000 });
 }
 
+// Playwright resizes the page as a whole. The iOS simulator additionally
+// exercises Safari's independent visual viewport with the system keyboard.
+async function keyboardViewport(browser, base) {
+  const phone = { width: 390, height: 844 };
+  const keyboard = { width: 390, height: 420 };
+  const context = await browser.newContext({ viewport: phone, isMobile: name !== 'firefox', hasTouch: true, reducedMotion: 'reduce' });
+  try {
+    const page = await context.newPage();
+    await page.goto(base + '/?mode=words&n=10');
+    await painted(page);
+    const words = page.locator('.lines-clip');
+    await words.tap();
+    const before = await page.evaluate(() => scrollY);
+    await page.setViewportSize(keyboard);
+    const centered = () => {
+      const r = document.querySelector('.lines-clip').getBoundingClientRect();
+      return Math.abs(scrollY + r.top + r.height / 2 - visualViewport.pageTop - visualViewport.height / 2) < 3;
+    };
+    await page.waitForFunction(centered, null, {timeout: 2500});
+    // A typist can look back at the controls and tap the text to center it again.
+    await page.evaluate(() => scrollTo({top: 0, behavior: 'instant'}));
+    await page.keyboard.insertText('a');
+    assert.equal(await page.locator('#typer-input').inputValue(), ' a');
+    assert.equal(await page.evaluate(() => scrollY), 0);
+    await words.tap();
+    await page.waitForFunction(centered);
+    await page.setViewportSize(phone);
+    await page.waitForFunction(y => Math.abs(scrollY - y) < 2 && !document.body.style.minHeight, before);
+    await words.tap();
+    await page.setViewportSize(keyboard);
+    await page.waitForFunction(centered);
+    await page.locator('header a[href="/settings"]').tap();
+    await page.waitForURL(base + '/settings');
+    assert.equal(await page.evaluate(() => document.body.style.minHeight), '');
+    assert.equal(await page.evaluate(() => scrollY), 0);
+  } finally { await context.close(); }
+}
+
 async function run() {
   const project = path.resolve(__dirname, '..');
   const data = mkdtempSync(path.join(tmpdir(), 'typer-canvas-'));
@@ -41,6 +79,7 @@ async function run() {
   let browser;
   try {
     browser = process.env.BROWSER_WS_ENDPOINT ? await browserType.connect(process.env.BROWSER_WS_ENDPOINT) : await browserType.launch({ headless: true });
+    await keyboardViewport(browser, base);
     for (const colorScheme of ['light', 'dark']) {
       const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, colorScheme, isMobile: name !== 'firefox', hasTouch: true });
       try {

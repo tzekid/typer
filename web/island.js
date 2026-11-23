@@ -298,6 +298,7 @@
     seed = null;
     textGen = -1;
     if (cfg.rtl || cfg.joining) mountShaped(el, cfg.rtl);
+    el.releaseViewport = followTypingViewport(el);
     listen(el);
     const mine = el;
     prepare(main)
@@ -330,9 +331,135 @@
     slide = null;
     pendingDelete = null;
     if (el.shaped) clearShapedHighlights();
+    el.releaseViewport?.();
     el = null;
     cfg = null;
     flush();
+  }
+
+  // On phones the keyboard can pan the visual viewport independently of the
+  // document. Center the painted lines, which sit below the hidden input.
+  function followTypingViewport({ stage, input, clip, result }) {
+    const view = window.visualViewport;
+    if (!view || !matchMedia("(any-pointer: coarse)").matches) return;
+
+    const events = new AbortController();
+    const options = { signal: events.signal, passive: true };
+    let width = view.width;
+    let fullHeight = view.height;
+    let previousScrollY = scrollY;
+    let following = false;
+    let touchSelected = false;
+    let userScrolled = false;
+    let alignTimer, restoreTimer;
+    let rotatedWhileTyping = false;
+    const keyboardSizes = {}; // last measured keyboard viewport in each orientation
+
+    function release(restore) {
+      if (!following) return;
+      document.body.style.removeProperty("min-height");
+      if (restore && !userScrolled) {
+        const y = previousScrollY;
+        // Safari can ignore scroll requests while its native dismissal is
+        // finishing, even after reporting the full viewport height.
+        restoreTimer = setTimeout(() => {
+          if (!document.hidden && (document.activeElement === document.body || document.activeElement === input)) {
+            document.scrollingElement.scrollTop = y;
+          }
+        }, document.activeElement === input ? 0 : 600);
+      }
+      rotatedWhileTyping = false;
+      following = false;
+      touchSelected = false;
+      userScrolled = false;
+    }
+
+    function align() {
+      if (document.hidden) return;
+      if (view.scale !== 1) {
+        if (document.activeElement !== input || !result.hidden) release(false);
+        return;
+      }
+      const editing = document.activeElement === input;
+      if (view.width !== width) {
+        rotatedWhileTyping = following && editing;
+        width = view.width;
+        fullHeight = document.documentElement.clientHeight;
+      }
+      // Browser toolbar movement is smaller than a docked software keyboard.
+      const layoutHeight = document.documentElement.clientHeight;
+      const open = Math.max(layoutHeight, touchSelected ? fullHeight : 0) - view.height > 100;
+      const lines = clip.getBoundingClientRect();
+      const orientation = width > layoutHeight ? "landscape" : "portrait";
+      // During rotation Safari may report its full landscape viewport or
+      // a sliver in portrait while the same keyboard is still on screen.
+      const rotating = rotatedWhileTyping && editing && (!open || view.height < lines.height);
+      if (open && !rotating && editing && lines.height) {
+        keyboardSizes[orientation] = { width, height: view.height };
+        rotatedWhileTyping = false;
+      }
+      const leftEditor = !editing && document.activeElement !== document.body;
+      if ((!open && !rotating) || !result.hidden || leftEditor) {
+        release(!open && result.hidden && !leftEditor);
+        if (!open) fullHeight = Math.max(view.height, layoutHeight);
+        return;
+      }
+      // Done blurs the input before Safari finishes dismissing the keyboard.
+      // Restore on the ensuing resize, after its native pan has finished.
+      if (!editing || userScrolled || !lines.height) return;
+      let height = view.height;
+      if (rotating) {
+        const known = keyboardSizes[orientation];
+        if (known?.width === width) height = known.height;
+        else if (layoutHeight <= lines.height * 3) height = lines.height;
+      }
+      const pageTop = Math.max(0, scrollY + lines.top + (lines.height - height) / 2);
+      // Short pages otherwise hit their bottom scroll limit before the text
+      // reaches the center. The footer absorbs the extra height.
+      const needed = Math.ceil(pageTop + (rotating ? layoutHeight : view.height));
+      if (document.documentElement.scrollHeight < needed) document.body.style.minHeight = needed + "px";
+      following = true;
+      // Safari can report the same keyboard pan in both scrollY and offsetTop.
+      // Compare positions in document coordinates to avoid applying it twice.
+      const delta = pageTop - view.pageTop;
+      if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: still.matches ? "auto" : "smooth" });
+    }
+
+    function schedule() {
+      clearTimeout(alignTimer);
+      alignTimer = setTimeout(align, 90);
+    }
+
+    function select() {
+      clearTimeout(restoreTimer);
+      if (!following) previousScrollY = scrollY;
+      userScrolled = false;
+      schedule();
+    }
+
+    function userScroll() {
+      clearTimeout(restoreTimer);
+      if (following || (touchSelected && document.activeElement === input)) userScrolled = true;
+    }
+
+    stage.addEventListener("pointerdown", e => {
+      touchSelected = e.pointerType === "touch" || e.pointerType === "pen";
+      select();
+    }, options);
+    input.addEventListener("focus", select, options);
+    input.addEventListener("blur", schedule, options);
+    view.addEventListener("resize", schedule, options);
+    document.addEventListener("visibilitychange", schedule, options);
+    window.addEventListener("pageshow", schedule, options);
+    window.addEventListener("pointerdown", () => clearTimeout(restoreTimer), options);
+    window.addEventListener("touchmove", userScroll, options);
+    window.addEventListener("wheel", userScroll, options);
+    return () => {
+      clearTimeout(alignTimer);
+      clearTimeout(restoreTimer);
+      events.abort();
+      release(false);
+    };
   }
 
   // ------ drawing
@@ -874,7 +1001,7 @@
     // Touch keyboards open only from a tap's own events; the mouse is
     // handled in the document mousedown listener below.
     stage.addEventListener("click", () => {
-      if (el?.input === input && el.result.hidden) input.focus();
+      if (el?.input === input && el.result.hidden) input.focus({ preventScroll: true });
     });
 
     // Focus really went elsewhere in the page (not to another app or tab,
