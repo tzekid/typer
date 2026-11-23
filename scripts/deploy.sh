@@ -8,7 +8,8 @@ port=9334
 cd "$project_dir"
 [[ -z "$(git status --porcelain)" ]] || { echo 'Commit the complete change before deploying.' >&2; exit 1; }
 revision="$(git rev-parse --verify HEAD^{commit})"
-[[ "$(odin version)" == "odin version $(cat .odinversion)" ]] || { echo "Odin $(cat .odinversion) is required." >&2; exit 1; }
+compiler_version="$(odin version)"
+[[ "${compiler_version##* version }" == "$(cat .odinversion)" ]] || { echo "Odin $(cat .odinversion) is required." >&2; exit 1; }
 mkdir -p "$release_root/releases"
 exec 9>"$release_root/.deploy.lock"
 flock 9

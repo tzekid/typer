@@ -158,7 +158,14 @@ async function run() {
       await pointAt(page, phone.locator('[data-chart-point]').last());
       const bounds = await history.locator('.tip').boundingBox();
       assert(bounds.x >= 0 && bounds.x + bounds.width <= 320, JSON.stringify(bounds));
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      const overflowing = await page.evaluate(() => {
+        if (document.documentElement.scrollWidth <= innerWidth) return null;
+        const elements = [...document.querySelectorAll('body *')].filter(el =>
+          el.getBoundingClientRect().right > innerWidth).slice(0, 12).map(el =>
+          [el.tagName, el.getAttribute('class'), Math.round(el.getBoundingClientRect().right)]);
+        return {width: document.documentElement.scrollWidth, elements};
+      });
+      assert.equal(overflowing, null, JSON.stringify(overflowing));
       await history.screenshot({ path: path.join(output, `${name}-history-phone.png`) });
       await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
       await phone.focus();

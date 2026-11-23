@@ -76,6 +76,18 @@ async function run() {
         await page.locator('[data-next]').tap(); await painted(page);
         await page.keyboard.press('Shift+Tab');
         assert(!(await page.locator('#typer-input').evaluate(el => el === document.activeElement)));
+        await page.locator('#stage').tap();
+        const editor = page.locator('#typer-input');
+        const caret = page.locator('#caret');
+        const beforeIME = await caret.evaluate(el => el.style.transform);
+        const compose = (type, data) => editor.evaluate((el, event) =>
+          el.dispatchEvent(new CompositionEvent(event.type, {data: event.data, bubbles: true})), {type, data});
+        await compose('compositionstart', '');
+        await compose('compositionupdate', 'ab');
+        await page.waitForFunction(before => document.getElementById('caret').style.transform !== before, beforeIME);
+        await compose('compositionupdate', 'ac');
+        await compose('compositionend', 'ac');
+        assert.equal(await editor.inputValue(), ' ac', 'the IME can replace its candidate without duplicating text');
         await page.goto(base + '/?mode=words&n=10&lang=arabic_10k');
         await page.waitForSelector('.shaped-words[dir="rtl"] span');
         const positions = await page.locator('.shaped-words span').evaluateAll(spans =>

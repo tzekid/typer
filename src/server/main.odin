@@ -336,7 +336,7 @@ setup_from_query :: proc(q: string) -> (s: Test_Setup, ok: bool) {
 		s.numbers = query_value(q, "num") == "1"
 	}
 	if lang := query_value(q, "lang"); lang != "" {
-		if !known_language(lang) && quote_collection(lang) == nil {
+		if !known_language(lang) && (s.mode != .Quote || quote_collection(lang) == nil) {
 			return s, false
 		}
 		s.language = lang

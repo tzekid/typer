@@ -1450,7 +1450,7 @@ td.date a {
 .history-diagnosis { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 2.5rem; margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--border); }
 .history-diagnosis.solo { grid-template-columns: 1fr; max-width: 650px; }
 .history-keys > p:first-of-type { margin: 0.7rem 0 1.5rem; }
-.history-keyboard { display: grid; gap: 0.35rem; max-width: 550px; padding: 1.2rem 0; }
+.history-keyboard { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.35rem; max-width: 550px; padding: 1.2rem 0; }
 .history-key-row { display: flex; justify-content: center; gap: 0.35rem; }
 .history-key-row:nth-child(2) { padding-left: 0.8rem; }
 .history-key-row:nth-child(3) { padding-right: 0.3rem; }
@@ -1460,6 +1460,8 @@ td.date a {
   place-items: center;
   flex: 0 1 2.9rem;
   min-width: 0;
+  padding: 0;
+  font: inherit;
   height: 2.7rem;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1468,6 +1470,7 @@ td.date a {
   cursor: help;
 }
 .history-key-detail {
+  display: none;
   position: absolute;
   z-index: 2;
   left: 50%;
@@ -1490,7 +1493,7 @@ td.date a {
 .history-key:nth-child(-n+3) .history-key-detail { left: 0; right: auto; transform: none; }
 .history-key:nth-last-child(-n+3) .history-key-detail { left: auto; right: 0; transform: none; }
 .history-key:focus .history-key-detail,
-.history-key:hover .history-key-detail { opacity: 1; visibility: visible; }
+.history-key:hover .history-key-detail { display: block; opacity: 1; visibility: visible; }
 .history-key.level-1 { background: var(--sub-alt); color: var(--text); }
 .history-key.level-2 { background: color-mix(in srgb, var(--main) 14%, var(--bg)); color: var(--text); border-color: color-mix(in srgb, var(--main) 32%, var(--border)); }
 .history-key.level-3 { background: color-mix(in srgb, var(--main) 33%, var(--bg)); color: var(--text); border-color: var(--main); }
@@ -1596,7 +1599,7 @@ td.date a {
   .history-chart-phone { display: block !important; }
   .history-trajectory { margin: 0 -0.2rem; }
   .history-trajectory figcaption { gap: 0.5rem 1rem; font-size: 0.58rem; }
-  .history-diagnosis { grid-template-columns: 1fr; gap: 2rem; margin-top: 2rem; padding-top: 1.6rem; }
+  .history-diagnosis, .history-diagnosis.solo { grid-template-columns: minmax(0, 1fr); gap: 2rem; margin-top: 2rem; padding-top: 1.6rem; }
   .history-keyboard { gap: 0.3rem; padding: 0.7rem 0; }
   .history-key-row { gap: 0.25rem; }
   .history-key { height: 2.2rem; font-size: 0.78rem; }

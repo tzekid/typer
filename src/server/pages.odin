@@ -66,7 +66,11 @@ page_start :: proc(b: ^strings.Builder, p: Page, title: string, kind: string, pr
 		w(b, `"`)
 	}
 	w(b, `><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">`)
-	w(b, `<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#171717" media="(prefers-color-scheme: dark)"><title>`)
+	w(b, `<meta name="theme-color" content="`)
+	w(b, "#171717" if p.theme == "dark" else "#ffffff")
+	w(b, `" media="(prefers-color-scheme: light)"><meta name="theme-color" content="`)
+	w(b, "#ffffff" if p.theme == "light" else "#171717")
+	w(b, `" media="(prefers-color-scheme: dark)"><title>`)
 	engine.html_text(b, title)
 	w(b, `</title>`)
 	for name in preload {

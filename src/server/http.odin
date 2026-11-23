@@ -142,6 +142,7 @@ Loop :: struct {
 	listener:    net.TCP_Socket,
 	handler:     Handler,
 	connections: int,
+	scratch:     virtual.Arena,
 	responses:   int,
 	bodies:      int, // bytes of request bodies being received or handled
 }
@@ -182,6 +183,8 @@ run_loop :: proc(listener: net.TCP_Socket, handler: Handler) {
 		listener = listener,
 		handler  = handler,
 	}
+	_ = virtual.arena_init_growing(&loop.scratch)
+	defer virtual.arena_destroy(&loop.scratch)
 	nbio.accept_poly(listener, loop, on_accept)
 	for !intrinsics.volatile_load(&stopping) {
 		if err := nbio.tick(time.Second); err != nil && !intrinsics.volatile_load(&stopping) {
@@ -373,10 +376,16 @@ respond :: proc(c: ^Conn) {
 	}
 	// Analysis and rendering can allocate much more than the finished page.
 	// Release these temporaries before a slow socket starts its send.
-	scratch: virtual.Arena
-	_ = virtual.arena_init_growing(&scratch)
-	defer virtual.arena_destroy(&scratch)
-	context.allocator = virtual.arena_allocator(&scratch)
+	scratch := &c.loop.scratch
+	defer {
+		if scratch.total_used > ARENA_KEEP {
+			virtual.arena_destroy(scratch)
+			_ = virtual.arena_init_growing(scratch)
+		} else {
+			virtual.arena_free_all(scratch)
+		}
+	}
+	context.allocator = virtual.arena_allocator(scratch)
 	context.temp_allocator = context.allocator
 	c.loop.handler(&c.req, &c.res)
 	head := response_head(&c.req, &c.res)

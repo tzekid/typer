@@ -529,7 +529,7 @@
 
   function frame(now) {
     scheduled = false;
-    if (el === null) return;
+    if (!el?.ready) return;
     const n = ex.mt_frame(now);
     if (el.shaped) {
       if (n > 0) drawShaped();
@@ -635,6 +635,7 @@
     const flags = (cfg.punctuation ? 1 : 0) | (cfg.numbers ? 2 : 0) | (repeated ? 4 : 0);
     if (el.shaped) { el.shaped.replaceChildren(); el.shapedWords = []; el.shapedActive = 0; el.shapedSets = null; clearShapedHighlights(); }
     ex.mt_start(cfg.mode, cfg.mode2, flags, seed[0], seed[1]);
+    el.ready = true;
     topLine = 0;
     caretLine = -1;
     slide?.cancel();
@@ -714,12 +715,7 @@
     const imeKey = (e) => composing || e.isComposing || e.keyCode === 229 || e.timeStamp - composedAt < 30;
 
     input.addEventListener("keydown", (e) => {
-      if (ex === null || !el.result.hidden) return;
-      if (e.key === "Escape" && ex.mt_phase() === FINISHED) {
-        e.preventDefault();
-        restart(true);
-        return;
-      }
+      if (!el?.ready || !el.result.hidden) return;
       // Shift+Tab always leaves the editor. Tab indents code or restarts prose.
       if (e.key === "Tab" && e.shiftKey) return;
       if (e.key === "Tab" && !tabs) {
@@ -763,11 +759,11 @@
 
     // Releases change nothing on screen, so they schedule no frame.
     input.addEventListener("keyup", (e) => {
-      if (ex !== null) ex.mt_key_up(e.timeStamp, codeOf(e));
+      if (el?.ready) ex.mt_key_up(e.timeStamp, codeOf(e));
     });
 
     input.addEventListener("beforeinput", (e) => {
-      if (ex === null) return;
+      if (!el?.ready) return;
       const t = e.inputType;
       if (composing || e.isComposing || /Composition/.test(t)) return;
       if (t === "insertText" || t === "insertLineBreak") {
@@ -840,6 +836,7 @@
       kick();
     }
     input.addEventListener("compositionstart", () => {
+      if (!el?.ready) return;
       composing = true;
       composition = [];
       compositionEpoch = el.compositionEpoch;
@@ -850,6 +847,7 @@
     });
 
     input.addEventListener("compositionend", (e) => {
+      if (!composing) return;
       composing = false;
       composedAt = e.timeStamp;
       updateComposition(e.data, e.timeStamp, true);
@@ -901,10 +899,10 @@
     if (document.activeElement !== el.input) el.input.focus();
   });
 
-  // Typing anywhere focuses the test; on the result Tab deals the next test
-  // and Escape repeats this one, wherever the focus is.
+  // Printable keys can focus the test. Results retain ordinary focus navigation
+  // and Escape repeats the finished test.
   document.addEventListener("keydown", (e) => {
-    if (el === null || ex === null || document.activeElement === el.input) return;
+    if (!el?.ready || document.activeElement === el.input) return;
     if (e.target.closest(".chart-box")) return;
     if (e.key === "Escape" && ex.mt_phase() === FINISHED) {
       e.preventDefault();
@@ -916,7 +914,7 @@
     if (el.result.hidden && !e.metaKey && !e.altKey && !e.ctrlKey && [...e.key].length === 1) el.input.focus();
   });
   addEventListener("resize", () => {
-    if (el === null || ex === null) return;
+    if (!el?.ready) return;
     size();
     ex.mt_resize(cssWidth);
     kick();
@@ -925,7 +923,7 @@
   // backing store; a lost 2D context also forgets its scale and font), and
   // frames only paint what changed. Coming back repaints everything.
   function repaint() {
-    if (el === null || ex === null || document.visibilityState !== "visible") return;
+    if (!el?.ready || document.visibilityState !== "visible") return;
     size();
     ex.mt_resize(cssWidth);
     ex.mt_redraw();
@@ -939,7 +937,7 @@
   addEventListener("online", flush);
   addEventListener("typer:theme", () => {
     colors = readColors();
-    if (el === null || ex === null) return;
+    if (!el?.ready) return;
     ex.mt_redraw();
     kick();
   });

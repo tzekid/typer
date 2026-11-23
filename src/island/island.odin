@@ -955,7 +955,9 @@ place_caret :: proc() {
 	w := s.words[a]
 	input := engine.word_input(&s.test, i32(a))
 	x := w.x + s.prefix[w.pw_off + u32(min(len(input), int(w.runes)))]
-	if len(input) > int(w.runes) {
+	if w.newline && len(input) >= int(w.runes) && w.extra_w > 0 {
+		x = w.x + s.prefix[w.pw_off+w.runes-1] + w.extra_w
+	} else if len(input) > int(w.runes) {
 		x = w.x + w.width + w.extra_w
 	}
 	s.caret = {x, line_top(w.line)}
