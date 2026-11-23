@@ -90,12 +90,28 @@ async function run() {
         await compose('compositionupdate', 'ac');
         await compose('compositionend', 'ac');
         assert.equal(await editor.inputValue(), ' ac', 'the IME can replace its candidate without duplicating text');
+        await compose('compositionstart', 'ac');
+        await compose('compositionupdate', 'act');
+        await compose('compositionend', 'act');
+        assert.equal(await editor.inputValue(), ' act', 'reconversion must replace the existing suffix');
+        await editor.press('Tab');
+        assert.match(await page.locator('#hint').innerText(), /score won't count/);
+        const fresh = page.getByRole('button', {name: 'new words'});
+        if (await fresh.isVisible()) {
+          await fresh.tap();
+          assert.doesNotMatch(await page.locator('#hint').innerText(), /score won't count/);
+        }
         await page.goto(base + '/?mode=words&n=10&lang=arabic_10k');
         await page.waitForSelector('.shaped-words[dir="rtl"] span');
         const positions = await page.locator('.shaped-words span').evaluateAll(spans =>
           spans.slice(0, 2).map(s => ({ x: s.getBoundingClientRect().left, y: s.getBoundingClientRect().top, word: s.textContent })));
         assert(positions.every(p => p.word.length && !p.word.includes(' ')));
         assert(positions[1].y > positions[0].y || positions[0].x > positions[1].x, 'words must flow right to left');
+        assert(await caret.evaluate(el => {
+          const bounds = el.closest('.lines-clip').getBoundingClientRect();
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.left >= bounds.left - 0.5 && rect.right <= bounds.right + 0.5;
+        }), 'the initial RTL caret must fit inside the visible typing area');
         assert.deepEqual(errors, []);
         console.log(`${name} ${colorScheme}: painted glyphs, resize, theme changes, navigation, reload, mobile input, saved result and restart passed`);
       } finally { await context.close(); }

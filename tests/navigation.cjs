@@ -7,6 +7,7 @@ const { once } = require('node:events');
 const net = require('node:net');
 const browserType = require('playwright')[process.env.TEST_BROWSER || 'chromium'];
 const { start } = require('./charts.cjs');
+const { record } = require('./record.cjs');
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 async function run() {
@@ -27,6 +28,27 @@ async function run() {
     finally { release.resolve(); await context.close(); }
   }
   try {
+    await check('an interrupted rename keeps the form and can be retried', async context => {
+      const saved = await context.request.post(base + '/results', {
+        headers: {origin: base, 'content-type': 'application/octet-stream'}, data: record(201),
+      });
+      assert.equal(saved.status(), 201);
+      const page = await context.newPage();
+      await page.goto(base + '/me');
+      const form = page.locator('form[action="/me/name"]');
+      const input = form.locator('input[name="name"]');
+      await input.fill('Fresh name');
+      await page.route('**/me/name', route => route.abort('internetdisconnected'));
+      await form.getByRole('button').click();
+      await page.getByRole('alert').waitFor();
+      assert.equal(page.url(), base + '/me');
+      assert.equal(await input.inputValue(), 'Fresh name');
+      await page.unroute('**/me/name');
+      await form.getByRole('button').click();
+      await page.getByRole('link', { name: 'Fresh name' }).waitFor();
+      await page.reload();
+      assert.equal(await input.inputValue(), 'Fresh name');
+    });
     await check('a language without medium quotes opens an available quote and remembers it', async context => {
       const page = await context.newPage();
       await page.goto(base + '/?mode=quote&q=2&lang=slovak');
