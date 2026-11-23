@@ -1660,6 +1660,8 @@ td.date a {
 .results-scroll { max-width: 100%; overflow-x: auto; }
 .touch-restart { display: none; }
 @media (pointer: coarse) {
+  /* Keep a short test page flush with the visible browser after Done. */
+  body:has(main[data-page="test"]) { min-height: 100dvh; }
   .touch-restart { display: inline-block; }
   .desktop-shortcut, .after kbd { display: none; }
 }
