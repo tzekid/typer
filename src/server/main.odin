@@ -19,7 +19,8 @@ USAGE :: `usage:
   typer serve <data dir> [--listen 127.0.0.1:9334] [--packs <dir>] [--origin https://host]
   typer doctor <data dir>
   typer claim <data dir> <name> [--origin https://host]   give results saved before typists existed to a new typist
-  typer version`
+  typer version
+  typer schema-version`
 
 g_db: Db
 g_packs: string
@@ -41,6 +42,8 @@ main :: proc() {
 		cmd_claim(args[1:])
 	case "version":
 		fmt.println(VERSION)
+	case "schema-version":
+		fmt.println(len(MIGRATIONS))
 	case:
 		usage()
 	}

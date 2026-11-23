@@ -235,7 +235,7 @@ render_chart :: proc(b: ^strings.Builder, r: Result) {
 		}
 	}
 	// x labels
-	every := 1 if n <= 15 else 5 if n <= 60 else 10
+	every := 1 if n <= 15 else 5 if n <= 60 else 10 if n <= 120 else (n + 11) / 12
 	for i in 0 ..< n {
 		if (i + 1) % every != 0 && i != 0 {
 			continue

@@ -18,7 +18,7 @@ Db :: struct {
 	generation:   u64, // bumped by every write that can change a leaderboard
 	data_version: i64, // SQLite's; it changes when another connection commits
 	boards:       map[string]Cached_Board,
-	histories:    map[i64]Cached_History,
+	histories:    map[i64]^Cached_History,
 }
 
 @(private)
@@ -102,6 +102,11 @@ MIGRATIONS := [?]string {
 }
 
 db_open :: proc(db: ^Db, path: string) -> (err: string, ok: bool) {
+	defer if !ok && db.conn != nil {
+		err = strings.clone(err)
+		close_v2(db.conn)
+		db.conn = nil
+	}
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	if open_v2(cpath, &db.conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) != SQLITE_OK {
 		return sql_error(db.conn), false
@@ -112,18 +117,18 @@ db_open :: proc(db: ^Db, path: string) -> (err: string, ok: bool) {
 	row := step(st)
 	version := int(column_int64(st, 0))
 	finalize(st)
-	if row != SQLITE_ROW || version > len(MIGRATIONS) do return "unsupported database schema", false
-	msg: cstring
-	if exec(db.conn, SCHEMA, nil, nil, &msg) != SQLITE_OK do return string(msg), false
+	if row != SQLITE_ROW || version < 0 || version > len(MIGRATIONS) do return "unsupported database schema", false
+	if exec(db.conn, SCHEMA, nil, nil, nil) != SQLITE_OK do return sql_error(db.conn), false
 	for i in version ..< len(MIGRATIONS) {
 		script := strings.concatenate({"BEGIN;", MIGRATIONS[i], "PRAGMA user_version = ", itoa(i + 1), "; COMMIT;"}, context.temp_allocator)
-		if exec(db.conn, strings.clone_to_cstring(script, context.temp_allocator), nil, nil, &msg) != SQLITE_OK {
+		if exec(db.conn, strings.clone_to_cstring(script, context.temp_allocator), nil, nil, nil) != SQLITE_OK {
+			message := strings.clone(sql_error(db.conn), context.temp_allocator)
 			exec(db.conn, "ROLLBACK", nil, nil, nil)
-			return string(msg), false
+			return message, false
 		}
 	}
 	db.boards = make(map[string]Cached_Board, 16, runtime.heap_allocator())
-	db.histories = make(map[i64]Cached_History, 16, runtime.heap_allocator())
+	db.histories = make(map[i64]^Cached_History, 16, runtime.heap_allocator())
 	return "", true
 }
 
@@ -135,7 +140,16 @@ itoa :: proc(n: int, allocator := context.temp_allocator) -> string {
 }
 
 db_close :: proc(db: ^Db) {
+	histories_clear(db)
+	delete(db.histories)
+	for key, entry in db.boards {
+		cached := entry
+		virtual.arena_destroy(&cached.arena)
+		delete(key, runtime.heap_allocator())
+	}
+	delete(db.boards)
 	close_v2(db.conn)
+	db^ = {}
 }
 
 // "ok" when SQLite's quick check passes.

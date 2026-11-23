@@ -142,7 +142,7 @@ Run `scripts/deploy.sh` on the server, from a clean, committed tree. It:
 
 1. builds an `x86-64-v3` binary from scratch;
 2. installs it as an immutable release under `~/.local/opt/typer/releases/<rev>`;
-3. switches the `current` link and restarts the `typer.service` user unit;
+3. backs up SQLite before a schema upgrade, then switches the `current` link and restarts the `typer.service` user unit;
 4. checks `/healthz` and the running executable, and rolls back if either fails;
 5. keeps the ten newest releases.
 
@@ -162,6 +162,8 @@ Run `scripts/deploy.sh` on the server, from a clean, committed tree. It:
 <br>
 
 Migrations and the replay backfill run before the server listens. The backfill walks result ids in order and commits in batches of 100. A new result saves its analytics and its typist's per-setup totals in the same transaction. Missing or damaged totals are rebuilt from the per-result summaries and never reject a valid upload. The history page reads those totals through a cache bounded by typists and memory, cleared for a typist when they save a result. Its "How these numbers work" section defines every metric and threshold.
+
+Schema upgrades use the `sqlite3` CLI to save a consistent copy in a private `pre-upgrade.*` directory beside the database. If startup fails, deployment restores that copy before restarting the previous release. If results or typist accounts changed after cutover, deployment stops and preserves both databases for recovery.
 
 </details>
 

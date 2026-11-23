@@ -91,6 +91,7 @@ State :: struct {
 	quote_text:    [dynamic]u8,
 	quote_source:  [dynamic]u8,
 	quote_lang:    [dynamic]u8,
+	quote_id:      i32,
 	quote_group:   i32,
 	prefix:        [dynamic]f32,
 	words:         [dynamic]Word_Layout,
@@ -190,7 +191,7 @@ mt_set_quote :: proc "c" (text_len, source_len, lang_len: u32, id: u32, group: i
 	clear(&s.quote_lang)
 	append(&s.quote_lang, ..lang)
 	s.quote_group = group
-	s.setup.mode2 = i32(id)
+	s.quote_id = i32(id)
 }
 
 @(export)
@@ -281,7 +282,7 @@ mt_start :: proc "c" (mode, mode2: i32, flags: u32, seed_lo, seed_hi: u32) {
 	quote := engine.Mode(mode) == .Quote
 	s.setup = engine.Setup {
 		mode     = engine.Mode(mode),
-		mode2    = s.setup.mode2 if quote else mode2,
+		mode2    = s.quote_id if quote else mode2,
 		seed     = u64(seed_lo) | u64(seed_hi) << 32,
 		language = string(s.quote_lang[:]) if quote else s.pack.list.name,
 	}
@@ -537,7 +538,10 @@ check_deadline :: proc(ms: f64) {
 }
 
 @(private)
-apply :: proc(e: engine.Raw_Event) {
+apply :: proc(event: engine.Raw_Event) {
+	e := event
+	// Input events can arrive after a frame with an earlier OS timestamp.
+	if len(s.raw) > 0 do e.ms = max(e.ms, s.raw[len(s.raw) - 1].ms)
 	append(&s.raw, e)
 	engine.test_apply(&s.test, e)
 	if s.test.phase == .Finished && !s.reported {
@@ -602,9 +606,10 @@ mt_before_insert :: proc "c" (cp: u32) -> b32 {
 	if a < len(s.words) && !engine.is_space(rune(cp)) && cp != '\n' {
 		w := s.words[a]
 		input := engine.word_input(&s.test, i32(a))
-		if len(input) >= int(w.runes) {
-			rs := make([]rune, len(input) - int(w.runes) + 1, context.temp_allocator)
-			copy(rs, input[w.runes:])
+		letters := int(w.runes) - int(w.newline)
+		if len(input) >= letters {
+			rs := make([]rune, len(input) - letters + 1, context.temp_allocator)
+			copy(rs, input[letters:])
 			rs[len(rs) - 1] = rune(cp)
 			if w.x + w.width + measure_runes(rs) > s.width {
 				return false
@@ -703,6 +708,7 @@ mt_input_len :: proc "c" () -> u32 {
 
 @(export)
 mt_resize :: proc "c" (width: f32) {
+	if width <= 0 do return
 	context = ctx()
 	defer free_all(context.temp_allocator)
 	s.width = width
@@ -776,8 +782,7 @@ mt_frame :: proc "c" (now: f64) -> u32 {
 
 	if s.test.phase == .Finishing {
 		if now >= s.test.end_ms + FINISH_GRACE_MS {
-			stamp := now if len(s.raw) == 0 else max(now, s.raw[len(s.raw)-1].ms)
-			apply(engine.Raw_Event{ms = stamp, kind = .Finalize})
+			apply(engine.Raw_Event{ms = now, kind = .Finalize})
 		} else {
 			s.next_wake = s.test.end_ms + FINISH_GRACE_MS - now
 		}
@@ -837,7 +842,7 @@ draw_timer :: proc(now: f64) {
 		if s.setup.mode == .Time {
 			left := clamp(deadline() - now, 0, f64(s.setup.mode2) * 1000)
 			value = i64(math.ceil(max(left, 0) / 1000))
-			wake := math.mod(left, 1000)
+			wake := deadline() - now - f64(value - 1) * 1000
 			s.next_wake = wake if s.next_wake < 0 else min(s.next_wake, wake)
 		} else {
 			value = i64(s.test.active) << 32 | i64(engine.word_count(&s.test))

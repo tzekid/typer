@@ -1,5 +1,6 @@
 package server
 
+import "base:runtime"
 import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
@@ -53,8 +54,8 @@ Cached_History :: struct {
 
 histories_clear :: proc(db: ^Db) {
 	for _, entry in db.histories {
-		cached := entry
-		virtual.arena_destroy(&cached.arena)
+		virtual.arena_destroy(&entry.arena)
+		free(entry, runtime.heap_allocator())
 	}
 	clear(&db.histories)
 }
@@ -63,6 +64,7 @@ history_invalidate :: proc(db: ^Db, user_id: i64) {
 	if cached, ok := db.histories[user_id]; ok {
 		virtual.arena_destroy(&cached.arena)
 		delete_key(&db.histories, user_id)
+		free(cached, runtime.heap_allocator())
 	}
 }
 
@@ -157,11 +159,12 @@ db_history :: proc(db: ^Db, user_id: i64) -> ^History {
 		}
 		finalize(st)
 	}
-	if cached, found := &db.histories[user_id]; found {
+	if cached, found := db.histories[user_id]; found {
 		cached.used = now_ms()
 		return &cached.data
 	}
-	entry := Cached_History{used = now_ms()}
+	entry := new(Cached_History, runtime.heap_allocator())
+	entry.used = now_ms()
 	_ = virtual.arena_init_growing(&entry.arena)
 	context.allocator = virtual.arena_allocator(&entry.arena)
 	h := &entry.data
@@ -267,8 +270,7 @@ db_history :: proc(db: ^Db, user_id: i64) -> ^History {
 		history_invalidate(db, old_id)
 	}
 	db.histories[user_id] = entry
-	cached := &db.histories[user_id]
-	return &cached.data
+	return &entry.data
 }
 
 history_selected :: proc(h: ^History, query: string) -> int {
