@@ -54,6 +54,15 @@ wasm_result_round_trip :: proc(t: ^testing.T) {
 		testing.expect_value(t, res.status, expected)
 		testing.expect_value(t, string(res.body), string("/results/1"))
 	}
+	// A schema upgrade refreshes persisted scores from the record.
+	_, before, saved := db_get_record(&g_db, 1)
+	if !saved do testing.fail_now(t, "missing result")
+	testing.expect(t, sql_exec(g_db.conn, "UPDATE results SET wpm = 0 WHERE id = 1") == SQLITE_DONE)
+	testing.expect(t, sql_exec(g_db.conn, "DELETE FROM result_analytics") == SQLITE_DONE)
+	testing.expect(t, sql_exec(g_db.conn, "DELETE FROM history_totals") == SQLITE_DONE)
+	testing.expect(t, history_backfill(g_db.conn))
+	_, after, restored := db_get_record(&g_db, 1)
+	testing.expect(t, restored && after.valid && after.wpm == before.wpm && after.wpm > 0)
 	user, token, known := current_user(&req)
 	testing.expect(t, known)
 	h := db_history(&g_db, user.id)

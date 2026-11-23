@@ -75,9 +75,19 @@ history_backfill_store :: proc(conn: ^Sqlite, id: i64) -> bool {
 	finalize(st)
 	data: []u8
 	version := i64(ANALYTICS_VERSION)
-	if r, replayed := replay(record); replayed {
+	// Upgrade the derived scores as well as the summaries. Keep the original
+	// record and its owner even when a past result no longer qualifies.
+	if r, replayed := replay(record, verify_targets = s.valid); replayed {
 		data = analysis_encode(analyse_test(&r.test))
+		v := r.view.result
+		s.valid = s.valid && r.view.invalid == ""
+		s.duration = v.test_duration
+		if sql_exec(conn, `UPDATE results SET wpm=?, raw=?, acc=?, consistency=?, duration=?, valid=? WHERE id=?`,
+		            v.wpm, v.raw_wpm, v.acc, v.consistency, s.duration, i64(s.valid), id) != SQLITE_DONE {
+			return false
+		}
 	} else {
+		if s.valid && sql_exec(conn, "UPDATE results SET valid = 0 WHERE id = ?", id) != SQLITE_DONE do return false
 		data, version = []u8{0}, 0
 		fmt.eprintfln("history: result %d could not replay", id)
 	}

@@ -520,7 +520,7 @@ Replayed :: struct {
 
 // Re-derives everything about a test from its record, and for quotes checks
 // that the words typed are that quote's.
-replay :: proc(record: []u8, upload := false) -> (r: Replayed, ok: bool) {
+replay :: proc(record: []u8, verify_targets := false) -> (r: Replayed, ok: bool) {
 	setup, events, dok := engine.record_decode(record, &r.test)
 	if !dok {
 		return {}, false
@@ -541,7 +541,7 @@ replay :: proc(record: []u8, upload := false) -> (r: Replayed, ok: bool) {
 		if !known_language(setup.language) || setup.mode2 < 1 || setup.mode2 > MODE2_MAX {
 			return {}, false
 		}
-		if upload && !generated_targets(&r.test, setup, len(events)) do return {}, false
+		if verify_targets && !generated_targets(&r.test, setup, len(events)) do return {}, false
 		// The island deals a words test exactly its count of words.
 		if setup.mode == .Words && engine.word_count(&r.test) != setup.mode2 {
 			return {}, false
@@ -552,7 +552,7 @@ replay :: proc(record: []u8, upload := false) -> (r: Replayed, ok: bool) {
 	if !engine.record_replay(&r.test, events) {
 		return {}, false
 	}
-	if upload && setup.mode == .Time {
+	if verify_targets && setup.mode == .Time {
 		// Every advance deals one more target, even if the typist later backspaces.
 		furthest := 0
 		for e in r.test.inputs {
@@ -596,14 +596,14 @@ post_result :: proc(req: ^Request, res: ^Response) {
 		respond_text(res, 429, "slow down")
 		return
 	}
-	r, ok := replay(req.body, upload = true)
+	r, ok := replay(req.body, verify_targets = true)
 	if !ok {
 		respond_text(res, 400, "not a complete typer record")
 		return
 	}
 	user, token, known := current_user(req)
 	if !known && !valid_token(token) do token = new_token()
-		v := r.view
+	v := r.view
 	stored := Stored {
 		created_at = now_ms(),
 		setup      = v.setup,
@@ -656,6 +656,7 @@ result_page :: proc(req: ^Request, res: ^Response) {
 		return
 	}
 	v := r.view
+	if !stored.valid && v.invalid == "" do v.invalid = "This saved test could not be verified for the leaderboard."
 	v.id = id
 	v.typist = stored.user_name
 	when_b := strings.builder_make()
