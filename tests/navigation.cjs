@@ -102,6 +102,36 @@ async function run() {
       assert.deepEqual(errors, []);
       assert.equal(await page.locator('main').getAttribute('data-page'), 'settings');
     });
+    await check('a failed quote refill keeps the stage and retries at the same position', async context => {
+      let online = false;
+      const positions = [];
+      await context.route('**/quotes?**', async route => {
+        positions.push(new URL(route.request().url()).searchParams.get('from'));
+        if (online) await route.continue();
+        else await route.abort('internetdisconnected');
+      });
+      const page = await context.newPage();
+      await page.goto(base + '/?mode=quote&q=1');
+      const config = await page.locator('#typer-config').evaluate(node => JSON.parse(node.textContent));
+      const position = async () => page.evaluate(() => document.cookie.match(/typer_queue=[^.]+\.(\d+)/)?.[1]);
+      for (let i = 1; i <= config.quotes.length; i++) {
+        await page.waitForFunction(expected => document.cookie.includes('typer_queue=' + expected),
+          config.queue.seed + '.' + (config.queue.from + i));
+        await page.locator('#typer-input').press('Tab');
+      }
+      const retry = page.getByRole('button', { name: 'Try again' });
+      await retry.waitFor({ timeout: 3000 });
+      const last = Number(await position());
+      assert.equal(last, config.queue.from + config.quotes.length);
+      assert((await page.locator('#words-text').textContent()).trim().length > 0);
+      online = true;
+      await retry.click();
+      await page.waitForFunction(expected => document.cookie.includes('typer_queue=' + expected), config.queue.seed + '.' + (last + 1));
+      assert(positions.every(value => Number(value) === last));
+      assert.equal(await retry.count(), 0);
+      await page.keyboard.type('a');
+      assert.equal(await page.locator('#typer-input').inputValue(), ' a');
+    });
     assert.deepEqual(failures, []);
   } finally {
     await browser.close();
