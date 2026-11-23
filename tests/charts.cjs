@@ -10,30 +10,13 @@ const net = require('node:net');
 const browserName = process.env.CHART_BROWSER || 'chromium';
 const browserType = require('playwright')[browserName];
 
-function record(seed, count = 250) {
-  const chunks = [];
-  const u32 = n => { const b = Buffer.alloc(4); b.writeUInt32LE(n); chunks.push(b); };
-  chunks.push(Buffer.from('TYR1')); u32(1);
-  chunks.push(Buffer.from([0, 0, 0, 0])); u32(30); u32(seed); u32(0);
-  u32(7); chunks.push(Buffer.from('english'));
-  const words = Array.from({ length: 100 }, (_, i) => ['the', 'quick', 'brown', 'fox', 'jumps', 'over', 'lazy', 'dog'][i % 8]);
-  u32(words.length);
-  for (const word of words) { u32(word.length); u32(32); chunks.push(Buffer.from(word)); }
-  const text = words.join(' ') + ' ';
-  const events = [...text.slice(0, count)].map((c, i) => [1000 + i * 29900 / count, 3, c.charCodeAt(0)]);
-  events.push([31000, 6, 0], [31000, 7, 0]);
-  u32(events.length);
-  for (const [ms, kind, arg] of events) {
-    const b = Buffer.alloc(16); b.writeDoubleLE(ms); b[8] = kind; b.writeInt32LE(arg, 12); chunks.push(b);
-  }
-  return Buffer.concat(chunks);
-}
+const { record } = require('./record.cjs');
 
 async function seed(base, data) {
   let cookie = '';
   const ids = [];
   for (let i = 0; i < 12; i++) {
-    const res = await fetch(base + '/results', { method: 'POST', headers: { origin: base, cookie, 'content-type': 'application/octet-stream', 'x-forwarded-for': `fixture-${i}` }, body: record(i + 1, [260, 274, 235, 213, 250, 242, 263, 255, 247, 265, 251, 259][i]) });
+    const res = await fetch(base + '/results', { method: 'POST', headers: { origin: base, cookie, 'content-type': 'application/octet-stream' }, body: record(i + 1, [260, 274, 235, 213, 250, 242, 263, 255, 247, 265, 251, 259][i]) });
     assert.equal(res.status, 201, await res.text());
     if (res.headers.has('set-cookie')) cookie = res.headers.get('set-cookie').split(';')[0];
     ids.push(Number(res.headers.get('location').split('/').pop()));
@@ -175,7 +158,14 @@ async function run() {
       await pointAt(page, phone.locator('[data-chart-point]').last());
       const bounds = await history.locator('.tip').boundingBox();
       assert(bounds.x >= 0 && bounds.x + bounds.width <= 320, JSON.stringify(bounds));
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      const overflowing = await page.evaluate(() => {
+        if (document.documentElement.scrollWidth <= innerWidth) return null;
+        const elements = [...document.querySelectorAll('body *')].filter(el =>
+          el.getBoundingClientRect().right > innerWidth).slice(0, 12).map(el =>
+          [el.tagName, el.getAttribute('class'), Math.round(el.getBoundingClientRect().right)]);
+        return {width: document.documentElement.scrollWidth, elements};
+      });
+      assert.equal(overflowing, null, JSON.stringify(overflowing));
       await history.screenshot({ path: path.join(output, `${name}-history-phone.png`) });
       await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
       await phone.focus();
@@ -234,16 +224,25 @@ async function run() {
       const sparsePage = await sparse.newPage();
       await sparsePage.goto(base + '/history');
       assert.equal(await sparsePage.locator('.chart-box').count(), 0);
-      const first = await sparse.request.post(base + '/results', { headers: { origin: base, 'content-type': 'application/octet-stream', 'x-forwarded-for': 'sparse' }, data: record(1000, 240) });
+      const first = await sparse.request.post(base + '/results', { headers: { origin: base, 'content-type': 'application/octet-stream' }, data: record(1000, 240) });
       assert.equal(first.status(), 201);
       await sparsePage.reload();
       assert.equal(await sparsePage.locator('.history-trajectory').count(), 0);
       const firstId = Number(first.headers().location.split('/').pop());
-      for (let i = 1; i < 246; i++) {
-        const res = await sparse.request.post(base + '/results', { headers: { origin: base, 'content-type': 'application/octet-stream', 'x-forwarded-for': `dense-${i}` }, data: record(1000 + i, i === 244 ? 274 : 240 + i % 20) });
-        assert.equal(res.status(), 201);
-      }
+      // Populate the long-history fixture directly. The public upload path
+      // has already been exercised above and deliberately limits writes.
       const db = new DatabaseSync(path.join(data, 'typer.sqlite'));
+      const { createHash } = require('node:crypto');
+      const add = db.prepare(`INSERT INTO results
+        (created_at, mode, mode2, language, punctuation, numbers, wpm, raw, acc, consistency, duration, valid, record_sha, record, user_id, qgroup)
+        SELECT created_at, mode, mode2, language, punctuation, numbers, ?, ?, acc, consistency, duration, valid, ?, ?, user_id, qgroup FROM results WHERE id = ?`);
+      db.exec('BEGIN');
+      for (let i = 1; i < 246; i++) {
+        const count = i === 244 ? 274 : 240 + i % 20;
+        const bytes = record(1000 + i, count);
+        add.run(count * 0.4, count * 0.4, createHash('sha256').update(bytes).digest('hex'), bytes, firstId);
+      }
+      db.exec('COMMIT');
       db.prepare('UPDATE results SET created_at = ? + (id - ?) * 60000 WHERE id >= ?').run(Date.now() - 246 * 60000, firstId, firstId);
       db.close();
       await sparsePage.reload();

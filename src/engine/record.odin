@@ -1,5 +1,7 @@
 package engine
 
+import "core:unicode/utf8"
+
 // A test as stored and uploaded: the setup, the target words and the platform
 // events the engine applied, in order. Replaying it through test_apply
 // reproduces the exact log, so every number is re-derived, never trusted.
@@ -11,7 +13,8 @@ package engine
 //   u32 event count | per event: f64 ms, u8 kind, u8 pad, u16 code, i32 arg
 
 RECORD_MAGIC :: "TYR1"
-RECORD_VERSION :: u32(1)
+RECORD_VERSION :: u32(2)
+WORDS_AHEAD :: 100
 RECORD_MAX_WORDS :: 100_000
 RECORD_MAX_EVENTS :: 1_000_000
 RECORD_MAX_MS :: 1e12 // event times are page clock milliseconds
@@ -43,6 +46,7 @@ Record_Flag :: enum u8 {
 Record_Flags :: bit_set[Record_Flag;u8]
 
 Setup :: struct {
+	version:  u32,
 	mode:     Mode,
 	mode2:    i32,
 	flags:    Record_Flags,
@@ -136,7 +140,7 @@ read_u32 :: proc(r: ^Reader) -> u32 {
 
 @(private)
 read_bytes :: proc(r: ^Reader, n: int) -> []u8 {
-	if !r.ok || n < 0 || r.at + n > len(r.data) {
+	if !r.ok || n < 0 || n > len(r.data) - r.at {
 		r.ok = false
 		return nil
 	}
@@ -149,11 +153,13 @@ read_bytes :: proc(r: ^Reader, n: int) -> []u8 {
 // returns its setup and events. Strings and events alias `data` / `allocator`.
 record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (setup: Setup, events: []Raw_Event, ok: bool) {
 	r := Reader{data = data, ok = true}
-	if string(read_bytes(&r, 4)) != RECORD_MAGIC || read_u32(&r) != RECORD_VERSION {
+	magic := string(read_bytes(&r, 4))
+	setup.version = read_u32(&r)
+	if magic != RECORD_MAGIC || setup.version < 1 || setup.version > RECORD_VERSION {
 		return {}, nil, false
 	}
 	head := read_bytes(&r, 4)
-	if !r.ok || head[0] > u8(max(Mode)) {
+	if !r.ok || head[0] > u8(max(Mode)) || head[1] & ~u8(7) != 0 || head[2] != 0 || head[3] != 0 {
 		return {}, nil, false
 	}
 	setup.mode = Mode(head[0])
@@ -173,15 +179,18 @@ record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (
 	}
 	test_reset(t, cfg)
 	n := int(read_u32(&r))
-	if !r.ok || n > RECORD_MAX_WORDS {
+	if !r.ok || n < 1 || n > RECORD_MAX_WORDS || n > (len(data) - r.at) / 8 {
 		return {}, nil, false
 	}
 	for _ in 0 ..< n {
 		size := int(read_u32(&r))
 		commit := rune(read_u32(&r))
 		body := read_bytes(&r, size)
-		if !r.ok || (commit != 0 && commit != ' ' && commit != '\n') {
+		if !r.ok || !utf8.valid_string(string(body)) || (setup.version >= 2 && size > 1024) || (commit != 0 && commit != ' ' && commit != '\n') {
 			return {}, nil, false
+		}
+		for b in body {
+			if b < 32 && b != '\t' || b == 127 do return {}, nil, false
 		}
 		test_add_word(t, string(body), commit)
 	}
@@ -192,6 +201,7 @@ record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (
 		return {}, nil, false
 	}
 	events = make([]Raw_Event, count, allocator)
+	previous := -f64(RECORD_MAX_MS)
 	for &e in events {
 		lo_ms := read_u32(&r)
 		hi_ms := read_u32(&r)
@@ -203,9 +213,10 @@ record_decode :: proc(data: []u8, t: ^Test, allocator := context.allocator) -> (
 		e.kind = Raw_Kind(k[0])
 		e.code = u16(k[2]) | u16(k[3]) << 8
 		e.arg = i32(read_u32(&r))
-		if !(abs(e.ms) <= RECORD_MAX_MS) || (e.kind == .Insert && !is_scalar(e.arg)) {
+		if !(abs(e.ms) <= RECORD_MAX_MS) || (setup.version >= 2 && e.ms < previous) || k[1] != 0 || (e.kind == .Insert && !is_scalar(e.arg)) {
 			return {}, nil, false
 		}
+		previous = e.ms
 	}
 	return setup, events, r.ok && r.at == len(r.data)
 }

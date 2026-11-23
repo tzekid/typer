@@ -190,6 +190,7 @@ pack_language :: proc(path, name, out: string, keep: runtime.Allocator) -> (stri
 	if flag(o, "rightToLeft") do flags += {.Right_To_Left}
 	if flag(o, "orderedByFrequency") do flags += {.Ordered_By_Frequency}
 	if flag(o, "noLazyMode") do flags += {.No_Lazy_Mode}
+	if flag(o, "originalPunctuation") do flags += {.Original_Punctuation}
 	if flag(o, "joiningScript") do flags += {.Joining_Script}
 
 	list := make([]string, len(words))

@@ -9,7 +9,7 @@ import engine "../engine"
 
 // Versioned, sparse counts. Times are hundredths of a millisecond, matching
 // the finalized engine log. Scoring and validity are never derived here.
-ANALYTICS_VERSION :: 2
+ANALYTICS_VERSION :: 2 // wire layout stays readable by the previous release
 ANALYTICS_HEADER :: 56
 
 Key_Analysis :: struct {
@@ -69,7 +69,7 @@ analyse_test :: proc(t: ^engine.Test) -> Test_Analysis {
 		target := engine.target_word(t, e.word_index)
 		if e.char_index >= 0 && int(e.char_index) < len(target) {
 			key := unicode.to_lower(target[e.char_index])
-			if !unicode.is_space(key) {
+			if analysis_rune(key) && !unicode.is_space(key) {
 				i, found := keys[key]
 				if !found {
 					i = len(a.keys)
@@ -133,7 +133,7 @@ analysis_mistakes :: proc(t: ^engine.Test, a: ^Test_Analysis) {
 		positions[e.word_index] = v
 		if .Correct in e.flags || e.char_index < 0 || int(e.char_index) >= len(target) do continue
 		expected, typed := unicode.to_lower(target[e.char_index]), unicode.to_lower(e.data)
-		if expected == typed || unicode.is_space(expected) || unicode.is_space(typed) do continue
+		if !analysis_rune(expected) || !analysis_rune(typed) || expected == typed || unicode.is_space(expected) || unicode.is_space(typed) do continue
 		code := u64(u32(expected)) << 32 | u64(u32(typed))
 		i, found := subs[code]
 		if !found {
@@ -150,6 +150,7 @@ analysis_mistakes :: proc(t: ^engine.Test, a: ^Test_Analysis) {
 		target := engine.target_word(t, position)
 		end := len(target)
 		for end > 0 && unicode.is_space(target[end - 1]) do end -= 1
+		if end == 0 do continue
 		for c in target[:end] do strings.write_rune(&b, unicode.to_lower(c))
 		word := strings.to_string(b)
 		i, found := words[word]

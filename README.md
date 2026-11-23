@@ -66,15 +66,15 @@ No npm, no framework, no accounts.
 - **Modes.** Time (15, 30, 60, 120 s), words (10, 25, 50, 100) and quotes (short, medium, long, thicc or all), with punctuation and numbers.
 - **Content.** 444 word lists and 15,828 quotes, all from Monkeytype. Each browser gets its own shuffled quote queue, so no quote repeats until the pool runs out.
 - **Typists without accounts.** Your first finished test gives your browser a typist with a generated name. Rename it on `/me`, where a key link takes the same typist to another device.
-- **No result lost.** A finished test waits in an outbox until the server has it, so going offline or closing the tab loses nothing.
+- **Offline results.** A finished test waits in the browser outbox and retries when the connection returns. If browser storage is unavailable, keep the tab open until the result saves.
 - **Themes and motion.** Light, dark or the system's. Smooth motion is optional: the caret glides along a line and finished lines slide out of view.
 
 | Key | Does |
 |---|---|
-| <kbd>Tab</kbd> | Restarts. During a test you get the same text again¹; before the first key and on the result, new text. |
+| <kbd>Tab</kbd> | While typing, restarts with the same text¹. Before the first key, deals new text. In code quotes with tabs, indents. |
 | <kbd>Esc</kbd> | On the result, repeats the test just done¹. |
-| <kbd>Enter</kbd> | Types a line break, shown as ↵, in quotes that have them. |
-| <kbd>Shift+Tab</kbd> | Restarts a quote that contains tabs, where <kbd>Tab</kbd> types them. |
+| <kbd>Enter</kbd> | Types a line break (↵) in a quote. After a result, activates the focused “next test” button. |
+| <kbd>Shift+Tab</kbd> | Moves keyboard focus out of the typing field. Code quotes and touchscreens also have a restart button. |
 
 ¹ As on Monkeytype, a test whose words you have already seen doesn't count. A quote may be retried and still count.
 

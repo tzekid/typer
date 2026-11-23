@@ -61,6 +61,7 @@ Word_List :: struct {
 	offsets:              []u32,
 	blob:                 []u8,
 	rtl:                  bool,
+	original_punctuation: bool,
 	ordered_by_frequency: bool,
 }
 
@@ -160,6 +161,8 @@ Generator :: struct {
 	punctuation:      bool,
 	numbers:          bool,
 	spanish_sentence: rune,
+	section:          string, // remaining tokens from the chosen pack entry
+	legacy:           bool, // version 1 records used unsplit entries
 	prev:             [dynamic]u8, // previous generated word (raw, no commit)
 	prev2:            [dynamic]u8,
 }
@@ -171,6 +174,8 @@ generator_init :: proc(g: ^Generator, words: Word_List, seed: u64, punctuation, 
 	g.punctuation = punctuation
 	g.numbers = numbers
 	g.spanish_sentence = 0
+	g.section = ""
+	g.legacy = false
 	clear(&g.prev)
 	clear(&g.prev2)
 }
@@ -254,24 +259,20 @@ generator_next :: proc(g: ^Generator, index, bound: int, allocator := context.te
 		return ""
 	}
 	prev := string(g.prev[:])
-	prev2 := string(g.prev2[:])
-	prev_raw := strip_for_compare(prev, false)
-	prev2_raw := strip_for_compare(prev2, true)
-
-	word := word_list_get(g.words, rng_int(&g.rng, 0, n - 1))
-	first := strings.to_lower(word, context.temp_allocator)
-	for tries := 0; tries < 100; tries += 1 {
-		reroll :=
-			prev_raw == first ||
-			prev2_raw == first ||
-			(!g.punctuation && word == "I") ||
-			(!g.punctuation && g.group != .Code && has_symbol(word)) ||
-			(!g.numbers && has_digit(word))
-		if !reroll {
-			break
+	word := g.section
+	if word == "" {
+		word = choose_entry(g)
+	}
+	if !g.legacy {
+		word = strings.trim_left_proc(word, section_space)
+		g.section = ""
+		for ch, at in word {
+			if section_space(ch) {
+				g.section = strings.trim_left_proc(word[at:], section_space)
+				word = word[:at]
+				break
+			}
 		}
-		word = word_list_get(g.words, rng_int(&g.rng, 0, n - 1))
-		first = word
 	}
 
 	out := word
@@ -285,7 +286,7 @@ generator_next :: proc(g: ^Generator, index, bound: int, allocator := context.te
 	if g.group == .Swiss_German {
 		out, _ = strings.replace_all(out, "ß", "ss", allocator)
 	}
-	if g.punctuation {
+	if g.punctuation && (g.legacy || !g.words.original_punctuation) {
 		out = punctuate(g, prev, out, index, bound, allocator)
 	}
 	if g.numbers && rng_f64(&g.rng) < 0.1 {
@@ -297,6 +298,37 @@ generator_next :: proc(g: ^Generator, index, bound: int, allocator := context.te
 	clear(&g.prev)
 	append(&g.prev, out)
 	return out
+}
+
+@(private)
+section_space :: proc(ch: rune) -> bool {
+	return unicode.is_space(ch) || is_space(ch)
+}
+
+@(private)
+choose_entry :: proc(g: ^Generator) -> string {
+	prev := string(g.prev[:])
+	prev2 := string(g.prev2[:])
+	prev_raw := strip_for_compare(prev, false)
+	prev2_raw := strip_for_compare(prev2, true)
+
+	word := word_list_get(g.words, rng_int(&g.rng, 0, word_list_len(g.words) - 1))
+	first := strings.to_lower(word, context.temp_allocator)
+	for tries := 0; tries < 100; tries += 1 {
+		reroll :=
+			prev_raw == first ||
+			prev2_raw == first ||
+			(!g.punctuation && word == "I") ||
+			(!g.punctuation && g.group != .Code && has_symbol(word)) ||
+			(!g.numbers && has_digit(word))
+		if !reroll {
+			break
+		}
+		word = word_list_get(g.words, rng_int(&g.rng, 0, word_list_len(g.words) - 1))
+		first = word
+	}
+
+	return word
 }
 
 @(private)
@@ -442,7 +474,15 @@ punctuate :: proc(g: ^Generator, previous: string, current: string, index, maxin
 			word = strings.concatenate({word, ","}, allocator)
 		}
 	} else if rng_f64(r) < 0.25 && lang == .Code {
-		specials := [?]string{"{", "}", "[", "]", "(", ")", ";", "=", "+", "%", "/"}
+		specials: []string ={"{", "}", "[", "]", "(", ")", ";", "=", "+", "%", "/"}
+		if !g.legacy {
+			name := g.words.name
+			if strings.has_prefix(name, "code_c") && !strings.has_prefix(name, "code_css") || strings.has_prefix(name, "code_arduino") {
+				specials = {"{", "}", "[", "]", "(", ")", ";", "=", "+", "%", "/", "/*", "*/", "//", "!=", "==", "<=", ">=", "||", "&&", "<<", ">>", "%=", "&=", "*=", "++", "+=", "--", "-=", "/=", "^=", "|="}
+			} else if strings.has_prefix(name, "code_javascript") {
+				specials = {"{", "}", "[", "]", "(", ")", ";", "=", "+", "%", "/", "\x60"}
+			}
+		}
 		word = specials[rng_int(r, 0, len(specials) - 1)]
 	} else if rng_f64(r) < 0.5 && lang == .English {
 		word = english_contraction(r, word, allocator)

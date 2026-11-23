@@ -42,7 +42,7 @@ stat :: proc(b: ^strings.Builder, label: string, value: string, tip: string = ""
 	html_text(b, label)
 	strings.write_string(b, `</div><div class="value"`)
 	if tip != "" {
-		strings.write_string(b, ` data-tip="`)
+		strings.write_string(b, ` tabindex="0" data-tip="`)
 		html_attr(b, tip)
 		strings.write_byte(b, '"')
 	}
@@ -191,6 +191,12 @@ render_chart :: proc(b: ^strings.Builder, r: Result) {
 	strings.write_string(b, `" data-err-top="`)
 	write_fixed(b, err_top, 0)
 	strings.write_byte(b, '"')
+	strings.write_string(b, ` data-seconds="`)
+	for sec, i in r.chart_seconds {
+		if i != 0 do strings.write_byte(b, ',')
+		write_fixed(b, sec, 2)
+	}
+	strings.write_byte(b, '"')
 	series(b, "wpm", r.chart_wpm)
 	series(b, "raw", r.chart_raw)
 	series(b, "burst", r.chart_burst)
@@ -239,7 +245,7 @@ render_chart :: proc(b: ^strings.Builder, r: Result) {
 		strings.write_string(b, `" y="`)
 		write_fixed(b, CHART_H - 6, 1)
 		strings.write_string(b, `" text-anchor="middle">`)
-		strings.write_int(b, i + 1)
+		write_fixed(b, r.chart_seconds[i], 0 if math.floor(r.chart_seconds[i]) == r.chart_seconds[i] else 2)
 		strings.write_string(b, `</text>`)
 	}
 	points :: proc(b: ^strings.Builder, vals: []f64, top: f64, n: int) {

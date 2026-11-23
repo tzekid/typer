@@ -17,6 +17,7 @@ Pack_Flag :: enum u32 {
 	Ordered_By_Frequency,
 	No_Lazy_Mode,
 	Joining_Script,
+	Original_Punctuation,
 }
 Pack_Flags :: bit_set[Pack_Flag;u32]
 
@@ -65,24 +66,18 @@ pack_view :: proc(data: []u8) -> (p: Pack, ok: bool) {
 	}
 	p.flags = transmute(Pack_Flags)get_u32(data, 4)
 	n := int(get_u32(data, 8))
-	name_len := int(get_u32(data, 12))
-	at := 16 + name_len
-	if at > len(data) {
-		return {}, false
-	}
-	name := string(data[16:at])
-	for at % 4 != 0 {
-		at += 1
-	}
-	offsets_end := at + (n + 1) * 4
-	if n < 0 || offsets_end > len(data) || uintptr(raw_data(data)) % 4 != 0 {
-		return {}, false
-	}
+	name_len := u64(get_u32(data, 12))
+	start := u64(16) + name_len
+	aligned := (start + 3) & ~u64(3)
+	end := aligned + (u64(get_u32(data, 8)) + 1) * 4
+	if end > u64(len(data)) || uintptr(raw_data(data)) % 4 != 0 do return {}, false
+	name := string(data[16:int(start)])
+	at, offsets_end := int(aligned), int(end)
 	offsets := ([^]u32)(raw_data(data[at:]))[:n + 1]
 	blob := data[offsets_end:]
 	prev: u32
 	for o in offsets {
-		if o < prev || int(o) > len(blob) {
+		if o < prev || u64(o) > u64(len(blob)) {
 			return {}, false
 		}
 		prev = o
@@ -91,6 +86,7 @@ pack_view :: proc(data: []u8) -> (p: Pack, ok: bool) {
 		name                 = name,
 		offsets              = offsets,
 		blob                 = blob,
+		original_punctuation = .Original_Punctuation in p.flags,
 		rtl                  = .Right_To_Left in p.flags,
 		ordered_by_frequency = .Ordered_By_Frequency in p.flags,
 	}

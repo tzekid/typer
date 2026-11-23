@@ -16,12 +16,20 @@
   const channel = "BroadcastChannel" in window ? new BroadcastChannel("typer:theme") : null;
   const current = () => root.dataset.theme || (media.matches ? "dark" : "light");
 
+  function themeColor() {
+    for (const tag of document.querySelectorAll('meta[name="theme-color"]')) {
+      tag.content = root.dataset.theme ? (current() === "dark" ? "#171717" : "#ffffff") : (tag.media.includes("dark") ? "#171717" : "#ffffff");
+    }
+  }
+  themeColor();
+
   // theme: "light", "dark" or "" to follow the system.
   function setTheme(theme, announce) {
     if (theme) root.dataset.theme = theme;
     else delete root.dataset.theme;
     document.cookie = `typer_theme=${theme}; Path=/; Max-Age=${theme ? 31536000 : 0}; SameSite=Lax`;
     for (const radio of document.querySelectorAll('input[name="theme"]')) radio.checked = radio.value === (theme || "system");
+    themeColor();
     dispatchEvent(new CustomEvent("typer:theme"));
     if (announce && channel) channel.postMessage(theme);
   }
@@ -46,9 +54,9 @@
   let latest = 0; // a newer navigation wins over a slower older one
 
   function target(a, e) {
-    if (!a || a.target || a.hasAttribute("download")) return null;
+    if (!a || a.getAttribute("target") || a.hasAttribute("download")) return null;
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
-    const url = new URL(a.href, location.href);
+    const url = new URL(a.getAttribute("href"), location.href);
     if (url.origin !== location.origin || NATIVE.test(url.pathname)) return null;
     if (url.hash && url.pathname === location.pathname && url.search === location.search) return null;
     return url;
@@ -62,7 +70,9 @@
   // Most clicks start ~80 ms before they finish: begin fetching right away.
   document.addEventListener("pointerdown", (e) => {
     const url = target(e.target.closest("a[href]"), e);
-    if (url) early = { href: url.href, page: load(url.href) };
+    if (!url || e.pointerType !== "mouse" || url.pathname === "/") return;
+    early = { href: url.href, page: load(url.href) };
+    early.page.catch(() => {});
   });
 
   document.addEventListener("click", (e) => {
@@ -85,7 +95,9 @@
       url.search = data;
       go(url.href, load(url.href), true);
     } else {
-      go(url.href, load(url.href, { method: "POST", body: data }), true);
+      const request = () => load(url.href, { method: "POST", body: data });
+      const identity = url.pathname === "/me/forget" || url.pathname === "/key";
+      go(url.href, identity && window.typer ? window.typer.changeIdentity(request) : request(), true);
     }
   });
 
@@ -143,8 +155,10 @@
 
   // Error responses are plain text (bad input, rate limit): show them in place.
   function problem(text) {
-    const p = document.createElement("p");
+    const main = document.querySelector("main");
+    const p = main.querySelector(".message.problem") || document.createElement("p");
     p.className = "message problem";
+    p.setAttribute("role", "alert");
     p.textContent = text;
     document.querySelector("main").prepend(p);
   }
@@ -184,11 +198,17 @@
     const button = e.target.closest("[data-copy]");
     if (!button) return;
     const field = button.previousElementSibling;
+    field.select();
+    if (!navigator.clipboard) { button.textContent = "select and copy"; return; }
     navigator.clipboard.writeText(field.value).then(() => {
       button.textContent = "copied";
       setTimeout(() => (button.textContent = "copy"), 1500);
-    });
-    field.select();
+    }).catch(() => { button.textContent = "select and copy"; });
+  });
+
+  document.addEventListener("click", event => {
+    const key = event.target.closest(".history-key, [data-tip]");
+    if (key) key.focus({ preventScroll: true });
   });
 
   // ------ filter: typing in it narrows a list (the languages)
@@ -217,8 +237,13 @@
   // ------ charts: one readout style, using each plot's rendered points
 
   const HIDDEN = "typer:chart-hidden";
-  const off = new Set((localStorage.getItem(HIDDEN) || "").split(" ").filter(Boolean));
-  const showSeries = () => (root.dataset.chartHidden = [...off].join(" "));
+  let hiddenSeries = "";
+  try { hiddenSeries = localStorage.getItem(HIDDEN) || ""; } catch {}
+  const off = new Set(hiddenSeries.split(" ").filter(Boolean));
+  const showSeries = () => {
+    root.dataset.chartHidden = [...off].join(" ");
+    for (const button of document.querySelectorAll("[data-series]")) button.setAttribute("aria-pressed", String(!off.has(button.dataset.series)));
+  };
   showSeries();
 
   document.addEventListener("click", (e) => {
@@ -226,7 +251,7 @@
     if (!button) return;
     const s = button.dataset.series;
     if (!off.delete(s)) off.add(s);
-    localStorage.setItem(HIDDEN, [...off].join(" "));
+    try { localStorage.setItem(HIDDEN, [...off].join(" ")); } catch {}
     showSeries();
     if (hovered?.box === button.closest(".chart-box")) showPoint(hovered, hovered.index);
   });
@@ -242,13 +267,15 @@
   let tipId = 0;
 
   function initCharts(scope) {
+    showSeries();
     for (const svg of scope.querySelectorAll(".chart-box svg")) {
       if (charts.has(svg)) continue;
       const box = svg.closest(".chart-box");
       const result = box.dataset.chart === "result";
       let points;
       if (result) {
-        points = [...svg.querySelector("polyline.wpm").points].map((p, i) => ({ x: p.x, y: p.y, data: { label: `Second ${i + 1}` } }));
+        const seconds = box.dataset.seconds.split(",").map(Number);
+        points = [...svg.querySelector("polyline.wpm").points].map((p, i) => ({ x: p.x, y: p.y, data: { label: `Second ${seconds[i]}` } }));
       } else {
         // A personal-best diamond can coincide with a sampled test dot.
         const unique = new Map();

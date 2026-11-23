@@ -69,7 +69,7 @@
       ex.mt_init(FONT_PX, 1000);
       ex.mt_use_english();
       packLanguage = "english";
-    });
+    }).catch((error) => { booting = null; throw error; });
     return booting;
   }
 
@@ -99,12 +99,12 @@
     if (!prepared.has(main)) {
       prepared.set(main, Promise.all([
         boot(),
-        c.language === "english" ? null : fetch(c.pack).then((res) => {
+        c.mode === QUOTE || c.language === "english" ? null : fetch(c.pack).then((res) => {
           if (!res.ok) throw new Error(`language pack ${c.language} failed to load`);
           return res.arrayBuffer();
         }),
         c.language === "english" ? null : document.fonts.load(FONT, LATIN_EXT),
-      ]).then(([, bytes]) => bytes));
+      ]).then(([, bytes]) => bytes).catch((error) => { prepared.delete(main); throw error; }));
     }
     // Preparing a page must not mutate the engine of the mounted test.
     return prepared.get(main);
@@ -113,7 +113,32 @@
   // ------ results outbox: kept until the server acknowledges them
 
   const OUTBOX = "typer:outbox";
-  const readOutbox = () => JSON.parse(localStorage.getItem(OUTBOX) || "[]");
+  let memoryBox = null;
+  function readOutbox() {
+    if (memoryBox) return memoryBox.slice();
+    try {
+      const items = JSON.parse(localStorage.getItem(OUTBOX) || "[]");
+      return Array.isArray(items) ? items.filter(item => typeof item === "string") : [];
+    } catch { return []; }
+  }
+  function writeOutbox(items) {
+    try {
+      localStorage.setItem(OUTBOX, JSON.stringify(items));
+      memoryBox = null;
+    } catch { memoryBox = items; }
+  }
+  const lock = (name, fn) => navigator.locks ? navigator.locks.request(name, fn) : fn();
+  async function changeIdentity(request) {
+    return lock("typer:upload", async () => {
+      const response = await request();
+      if (response.ok) {
+        await lock(OUTBOX, () => writeOutbox([]));
+        displayedRecord = null;
+        resultChannel?.postMessage({ forgotten: true });
+      }
+      return response;
+    });
+  }
   const toB64 = (bytes) => {
     let s = "";
     for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -123,24 +148,38 @@
   let flushing = false;
   let retryTimer = 0;
   let displayedRecord = null;
-  const resultChannel = new BroadcastChannel("typer:results");
+  const resultChannel = window.BroadcastChannel ? new BroadcastChannel("typer:results") : null;
 
-  function savedResult({ record, location }) {
+  function savedResult({ record, location, name, forgotten }) {
+    if (forgotten) {
+      memoryBox = null;
+      displayedRecord = null;
+      return;
+    }
+    const nav = document.querySelector("header.top nav");
+    if (name && nav && !nav.querySelector(".me")) {
+      const me = document.createElement("a");
+      me.className = "me";
+      me.href = "/me";
+      me.textContent = name;
+      nav.append(me);
+    }
     if (record === displayedRecord && location && el && !el.result.hidden) {
+      el.status.textContent = "";
       el.link.href = location;
       el.link.hidden = false;
     }
   }
-  resultChannel.onmessage = event => savedResult(event.data);
+  if (resultChannel) resultChannel.onmessage = event => savedResult(event.data);
 
   async function enqueue(record) {
     const encoded = toB64(record);
     displayedRecord = encoded;
     // Keep storage updates short; an upload never blocks a new local save.
-    await navigator.locks.request(OUTBOX, () => {
+    await lock(OUTBOX, () => {
       const box = readOutbox();
       box.push(encoded);
-      localStorage.setItem(OUTBOX, JSON.stringify(box));
+      writeOutbox(box);
     });
     flush();
   }
@@ -153,7 +192,11 @@
     try {
       // Only one tab uploads at a time, including the first response that
       // establishes the browser's identity cookie.
-      await navigator.locks.request("typer:upload", async () => {
+      await lock("typer:upload", async () => {
+        if (!readOutbox().length) return;
+        // Receive the identity cookie before any result can be committed.
+        const session = await fetch("/me/session", { method: "POST" });
+        if (!session.ok) throw new Error("Could not establish the typist session");
         for (;;) {
           const box = readOutbox();
           if (box.length === 0) break;
@@ -172,17 +215,19 @@
             retry = true;
             break;
           }
-          await navigator.locks.request(OUTBOX, () => {
+          await lock(OUTBOX, () => {
             const rest = readOutbox();
             const at = rest.indexOf(box[0]);
             if (at >= 0) rest.splice(at, 1);
-            localStorage.setItem(OUTBOX, JSON.stringify(rest));
+            writeOutbox(rest);
           });
           const loc = res.headers.get("location");
           if (res.ok && loc) {
-            const saved = { record: box[0], location: loc };
+            const saved = { record: box[0], location: loc, name: decodeURIComponent(res.headers.get("x-typist") || "") };
             savedResult(saved);
-            resultChannel.postMessage(saved);
+            resultChannel?.postMessage(saved);
+          } else if (box[0] === displayedRecord && el) {
+            el.status.textContent = "This result could not be saved.";
           }
         }
       });
@@ -191,7 +236,10 @@
       retry = true;
     } finally {
       flushing = false;
-      if (retry) retryTimer = setTimeout(flush, 5000);
+      if (retry) {
+        if (el && displayedRecord) el.status.textContent = memoryBox ? "Waiting to save. Keep this tab open." : "Queued. Will retry shortly.";
+        retryTimer = setTimeout(flush, 5000);
+      }
       else if (readOutbox().length) retryTimer = setTimeout(flush, 0);
     }
   }
@@ -239,6 +287,7 @@
       result: $("result"),
       after: $("after"),
       link: main.querySelector("[data-result-link]"),
+      status: main.querySelector("[data-save-status]"),
       hint: $("hint"),
       wordsText: $("words-text"),
     };
@@ -248,12 +297,13 @@
     queue = { seed: cfg.queue?.seed, from: cfg.queue?.from ?? 0, quotes: cfg.quotes ?? [], next: 0 };
     seed = null;
     textGen = -1;
+    if (cfg.rtl || cfg.joining) mountShaped(el, cfg.rtl);
     listen(el);
     const mine = el;
     prepare(main)
       .then((bytes) => {
         if (el !== mine) return;
-        usePack(cfg.language, bytes);
+        if (cfg.mode !== QUOTE) usePack(cfg.language, bytes);
         lineH = ex.mt_line_height();
         el.caret.style.height = `${lineH}px`;
         el.clip.style.height = `${lineH * 3}px`;
@@ -278,6 +328,8 @@
     clearTimeout(idleTimer);
     slide?.cancel();
     slide = null;
+    pendingDelete = null;
+    if (el.shaped) clearShapedHighlights();
     el = null;
     cfg = null;
     flush();
@@ -286,6 +338,7 @@
   // ------ drawing
 
   function size() {
+    if (!el.clip.clientWidth) return;
     cssWidth = Math.floor(el.clip.clientWidth);
     const h = ex.mt_height();
     const dpr = window.devicePixelRatio || 1;
@@ -302,7 +355,7 @@
   // decoded strings are cached; per-frame scratch text is decoded each time.
   function text(op, ptr, len) {
     if ((op & 0x80) === 0) return str(ptr, len);
-    const key = ptr * 4096 + len;
+    const key = ptr;
     let t = textCache.get(key);
     if (t === undefined) {
       t = str(ptr, len);
@@ -359,6 +412,87 @@
     }
   }
 
+  // Native text layout keeps joined glyphs and bidirectional runs intact.
+  // Each word has one text node. Ranges paint feedback without splitting it.
+  function mountShaped(elements, rtl) {
+    const layer = document.createElement("div");
+    layer.className = "shaped-words";
+    layer.dir = rtl ? "rtl" : "ltr";
+    layer.setAttribute("aria-hidden", "true");
+    elements.lines.before(layer);
+    elements.shaped = layer;
+    elements.shapedWords = [];
+    elements.shapedActive = 0;
+    elements.canvas.hidden = true;
+  }
+
+  const highlights = ["typed-correct", "typed-error", "typed-extra"];
+  function clearShapedHighlights() {
+    for (const name of highlights) CSS.highlights?.delete(name);
+  }
+
+  function drawShaped() {
+    const layer = el.shaped;
+    const words = el.shapedWords;
+    const count = ex.mt_word_count();
+    for (let i = words.length; i < count; i++) {
+      const target = str(ex.mt_word_text(i, 0), ex.mt_input_len());
+      const newline = target.endsWith("\n");
+      const display = target.replace(/[ \n]$/u, "").replaceAll("\t", "→") + (newline ? "↵" : "");
+      const span = document.createElement("span");
+      const node = document.createTextNode(display);
+      span.append(node);
+      layer.append(span, newline ? document.createElement("br") : document.createTextNode(" "));
+      words.push({ target, display, node, span, input: null });
+    }
+    const active = ex.mt_active_word();
+    // A cross-word deletion can change both neighboring words in one frame.
+    const previous = el.shapedActive ?? 0;
+    const sets = el.shapedSets ??= highlights.map(() => typeof Highlight === "function" ? new Highlight() : new Set());
+    const start = Math.max(0, Math.min(active, previous) - 1);
+    const end = Math.min(count - 1, Math.max(active, previous) + 1);
+    for (let i = start; i <= end; i++) {
+      const word = words[i];
+      const input = str(ex.mt_word_text(i, 1), ex.mt_input_len());
+      if (input === word.input) continue;
+      word.input = input;
+      for (const [kind, range] of word.ranges || []) sets[kind].delete(range);
+      word.ranges = [];
+      const chars = Array.from(word.display);
+      const actual = Array.from(input.replace(/[ \n]$/u, ""));
+      const target = Array.from(word.target);
+      const extras = actual.slice(chars.length).join("");
+      word.node.data = word.display + extras;
+      let offset = 0;
+      for (let k = 0; k < actual.length; k++) {
+        const glyph = chars[k] ?? actual[k];
+        const range = new Range();
+        range.setStart(word.node, offset);
+        offset += glyph.length;
+        range.setEnd(word.node, offset);
+        const kind = k >= chars.length ? 2 : actual[k] === target[k] ? 0 : 1;
+        sets[kind].add(range);
+        word.ranges.push([kind, range]);
+      }
+      word.caretOffset = offset;
+    }
+    el.shapedActive = active;
+    for (const [i, name] of highlights.entries()) CSS.highlights?.set(name, sets[i]);
+    const w = words[active];
+    if (!w) return;
+    const range = new Range();
+    range.setStart(w.node, w.caretOffset || 0);
+    range.collapse(true);
+    const point = range.getBoundingClientRect();
+    const clip = el.clip.getBoundingClientRect();
+    const row = Math.round((w.span.offsetTop || 0) / lineH);
+    const top = Math.max(0, row - 1) * lineH;
+    layer.style.transform = `translateY(-${top}px)`;
+    const origin = el.lines.getBoundingClientRect();
+    const x = point.height ? point.left : w.span.getBoundingClientRect()[cfg.rtl ? "right" : "left"];
+    el.caret.style.transform = `translate(${x - clip.left}px, ${clip.top - origin.top + row * lineH - top}px)`;
+  }
+
   // The caret glides along a line; to another line it jumps, and when the
   // text scrolls it rides up with its line instead of sweeping across it.
   function placeCaret() {
@@ -395,15 +529,22 @@
 
   function frame(now) {
     scheduled = false;
-    if (el === null) return;
+    if (!el?.ready) return;
     const n = ex.mt_frame(now);
-    if (n > 0) draw(n);
+    if (el.shaped) {
+      if (n > 0) drawShaped();
+    } else if (n > 0) draw(n);
+    const count = ex.mt_word_count();
+    if (el.accessibleCount !== count) {
+      el.wordsText.textContent = str(ex.mt_words_ptr(), ex.mt_input_len());
+      el.accessibleCount = count;
+    }
     const top = ex.mt_top_line();
     if (top !== topLine) {
-      if (top > topLine && motion > 0 && ex.mt_phase() === ACTIVE) slideUp(top - topLine);
+      if (!el.shaped && top > topLine && motion > 0 && ex.mt_phase() === ACTIVE) slideUp(top - topLine);
       topLine = top;
     }
-    placeCaret();
+    if (!el.shaped) placeCaret();
     if (ex.mt_timer_changed()) el.timer.textContent = str(ex.mt_timer_ptr(), ex.mt_timer_len());
     const hide = ex.mt_phase() >= FINISHING;
     if (el.caret.hidden !== hide) el.caret.hidden = hide;
@@ -474,10 +615,13 @@
   // can't count, as on Monkeytype); otherwise new text.
   async function restart(same, fade = true) {
     const mine = el;
+    if (mine.restarting) return;
     same &&= seed !== null;
     if (!same) {
       if (cfg.mode === QUOTE) {
-        const ready = await nextQuote();
+        mine.restarting = true;
+        let ready;
+        try { ready = await nextQuote(); } finally { mine.restarting = false; }
         if (el !== mine) return;
         if (!ready) {
           el.stage.textContent = "no quotes of this length here yet";
@@ -489,7 +633,9 @@
     }
     repeated = same && cfg.mode !== QUOTE;
     const flags = (cfg.punctuation ? 1 : 0) | (cfg.numbers ? 2 : 0) | (repeated ? 4 : 0);
+    if (el.shaped) { el.shaped.replaceChildren(); el.shapedWords = []; el.shapedActive = 0; el.shapedSets = null; clearShapedHighlights(); }
     ex.mt_start(cfg.mode, cfg.mode2, flags, seed[0], seed[1]);
+    el.ready = true;
     topLine = 0;
     caretLine = -1;
     slide?.cancel();
@@ -499,6 +645,10 @@
     el.link.hidden = true;
     displayedRecord = null;
     el.clip.hidden = false;
+    if (el.clip.clientWidth !== cssWidth) { size(); ex.mt_resize(cssWidth); }
+    pendingDelete = null;
+    el.compositionEpoch = (el.compositionEpoch || 0) + 1;
+    el.status.textContent = "";
     el.timer.hidden = false;
     el.hint.hidden = false;
     hint();
@@ -511,9 +661,10 @@
   }
 
   function hint() {
-    const key = tabs ? "shift + tab" : "tab";
-    const what = cfg.mode === QUOTE ? "a new quote" : "new words";
-    el.hint.innerHTML = `${repeated ? "same words again, so this one won't count · " : ""}<kbd>${key}</kbd> restart · twice for ${what}`;
+    el.hint.innerHTML = `<span class="desktop-shortcut">${repeated ? "same words again · " : ""}<kbd>tab</kbd> ${tabs ? "indent · " : "restart · "}<kbd>shift + tab</kbd> leave test</span><button type="button" class="quiet touch-restart">restart</button>`;
+    const button = el.hint.querySelector("button");
+    if (tabs) button.classList.remove("touch-restart");
+    button.onclick = onTab;
   }
 
   // Tab restarts a test that has begun with the same text, and deals new
@@ -528,7 +679,9 @@
     el.result.innerHTML = html;
     document.dispatchEvent(new CustomEvent("typer:result", { detail: el.result }));
     el.result.hidden = false;
+    el.status.textContent = "Saving…";
     el.after.hidden = false;
+    el.after.querySelector("[data-next]").focus({ preventScroll: true });
     el.clip.hidden = true;
     el.timer.hidden = true;
     el.hint.hidden = true;
@@ -562,16 +715,12 @@
     const imeKey = (e) => composing || e.isComposing || e.keyCode === 229 || e.timeStamp - composedAt < 30;
 
     input.addEventListener("keydown", (e) => {
-      if (ex === null) return;
-      if (e.key === "Escape" && ex.mt_phase() === FINISHED) {
+      if (!el?.ready || !el.result.hidden) return;
+      // Shift+Tab always leaves the editor. Tab indents code or restarts prose.
+      if (e.key === "Tab" && e.shiftKey) return;
+      if (e.key === "Tab" && !tabs) {
         e.preventDefault();
-        restart(true);
-        return;
-      }
-      // Tab restarts, unless the quote itself has tabs: then shift + tab does.
-      if (e.key === "Tab" && (!tabs || e.shiftKey)) {
-        e.preventDefault();
-        onTab();
+        if (!e.repeat) onTab();
         return;
       }
       if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown") {
@@ -589,6 +738,7 @@
           e.preventDefault();
           const cp = key.codePointAt(0);
           if (ex.mt_before_insert(cp)) ex.mt_insert(e.timeStamp, cp);
+          syncInput();
           kick();
           return;
         }
@@ -598,7 +748,7 @@
           kick();
           return;
         }
-      } else if (e.key === "Backspace" && e.ctrlKey && !ime) {
+      } else if (e.key === "Backspace" && (e.ctrlKey || e.metaKey) && !ime) {
         e.preventDefault();
         deleteBackward(e.timeStamp, 1);
         kick();
@@ -609,12 +759,13 @@
 
     // Releases change nothing on screen, so they schedule no frame.
     input.addEventListener("keyup", (e) => {
-      if (ex !== null) ex.mt_key_up(e.timeStamp, codeOf(e));
+      if (el?.ready) ex.mt_key_up(e.timeStamp, codeOf(e));
     });
 
     input.addEventListener("beforeinput", (e) => {
-      if (ex === null) return;
+      if (!el?.ready) return;
       const t = e.inputType;
+      if (composing || e.isComposing || /Composition/.test(t)) return;
       if (t === "insertText" || t === "insertLineBreak") {
         const data = t === "insertLineBreak" ? "\n" : e.data;
         if (data == null) {
@@ -639,12 +790,12 @@
           syncInput();
         }
         kick();
-      } else if (t === "deleteContentBackward" || t === "deleteWordBackward") {
+      } else if (t === "deleteContentBackward" || t === "deleteWordBackward" || t === "deleteHardLineBackward") {
         if (!ex.mt_before_delete()) {
           e.preventDefault();
           return;
         }
-        pendingDelete = { ms: e.timeStamp, word: t === "deleteWordBackward" ? 1 : 0 };
+        pendingDelete = { ms: e.timeStamp, word: t === "deleteContentBackward" ? 0 : 1 };
       } else if (t !== "insertCompositionText") {
         e.preventDefault();
       }
@@ -660,17 +811,46 @@
       kick();
     });
 
+    let composition = [];
+    let baseLength = 0;
+    let compositionEpoch;
+    function updateComposition(value, ms, commit) {
+      if (compositionEpoch !== el?.compositionEpoch || !el?.result.hidden) return;
+      const next = Array.from(value || "");
+      // An IME may replace the entire candidate on every key. Keep the
+      // unchanged prefix and record only edits the keyboard actually made.
+      let prefix = 0;
+      while (prefix < next.length && prefix < composition.length && next[prefix] === composition[prefix]) prefix++;
+      if (prefix < composition.length && ex.mt_before_delete()) {
+        ex.mt_delete(ms, 0, baseLength + prefix);
+      }
+      composition.length = prefix;
+      for (const ch of next.slice(prefix)) {
+        if (!commit && /\s/u.test(ch)) break;
+        const cp = ch.codePointAt(0);
+        if (!ex.mt_before_insert(cp)) break;
+        ex.mt_insert(ms, cp);
+        composition.push(ch);
+      }
+      typed();
+      kick();
+    }
     input.addEventListener("compositionstart", () => {
+      if (!el?.ready) return;
       composing = true;
+      composition = [];
+      compositionEpoch = el.compositionEpoch;
+      baseLength = Array.from(str(ex.mt_input_ptr(), ex.mt_input_len())).length;
+    });
+    input.addEventListener("compositionupdate", e => {
+      if (composing) updateComposition(e.data, e.timeStamp, false);
     });
 
     input.addEventListener("compositionend", (e) => {
+      if (!composing) return;
       composing = false;
       composedAt = e.timeStamp;
-      for (const ch of e.data || "") {
-        const cp = ch.codePointAt(0);
-        if (ex.mt_before_insert(cp)) ex.mt_insert(e.timeStamp, cp);
-      }
+      updateComposition(e.data, e.timeStamp, true);
       syncInput();
       kick();
     });
@@ -705,6 +885,7 @@
     const len = [...str(ex.mt_input_ptr(), ex.mt_input_len())].length;
     const remaining = len === 0 ? -1 : word ? 0 : len - 1;
     ex.mt_delete(ms, word, remaining);
+    syncInput();
   }
 
   // While a test is up, the mouse never takes focus from it: a press on the
@@ -713,21 +894,16 @@
   // page behaves normally, so its text can be selected.
   document.addEventListener("mousedown", (e) => {
     if (el === null || e.button !== 0 || !el.result.hidden) return;
-    if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (e.target.closest("a, button, input, textarea, select, [contenteditable]")) return;
     e.preventDefault();
     if (document.activeElement !== el.input) el.input.focus();
   });
 
-  // Typing anywhere focuses the test; on the result Tab deals the next test
-  // and Escape repeats this one, wherever the focus is.
+  // Printable keys can focus the test. Results retain ordinary focus navigation
+  // and Escape repeats the finished test.
   document.addEventListener("keydown", (e) => {
-    if (el === null || ex === null || document.activeElement === el.input) return;
+    if (!el?.ready || document.activeElement === el.input) return;
     if (e.target.closest(".chart-box")) return;
-    if (e.key === "Tab") {
-      e.preventDefault();
-      onTab();
-      return;
-    }
     if (e.key === "Escape" && ex.mt_phase() === FINISHED) {
       e.preventDefault();
       restart(true);
@@ -735,10 +911,10 @@
     }
     if (e.target.closest("input, textarea, select, dialog")) return;
     if ((e.key === "Enter" || e.key === " ") && e.target.closest("button, a")) return;
-    el.input.focus();
+    if (el.result.hidden && !e.metaKey && !e.altKey && !e.ctrlKey && [...e.key].length === 1) el.input.focus();
   });
   addEventListener("resize", () => {
-    if (el === null || ex === null) return;
+    if (!el?.ready) return;
     size();
     ex.mt_resize(cssWidth);
     kick();
@@ -747,7 +923,7 @@
   // backing store; a lost 2D context also forgets its scale and font), and
   // frames only paint what changed. Coming back repaints everything.
   function repaint() {
-    if (el === null || ex === null || document.visibilityState !== "visible") return;
+    if (!el?.ready || document.visibilityState !== "visible") return;
     size();
     ex.mt_resize(cssWidth);
     ex.mt_redraw();
@@ -761,14 +937,14 @@
   addEventListener("online", flush);
   addEventListener("typer:theme", () => {
     colors = readColors();
-    if (el === null || ex === null) return;
+    if (!el?.ready) return;
     ex.mt_redraw();
     kick();
   });
 
-  window.typer = { prepare, mount, unmount };
+  window.typer = { prepare, mount, unmount, changeIdentity };
 
   // This page may be the test; if not, warm up so the test opens drawn.
-  if (!mount(document.querySelector("main"), true)) addEventListener("load", () => setTimeout(boot, 300));
+  if (!mount(document.querySelector("main"), true)) addEventListener("load", () => setTimeout(() => boot().catch(() => {}), 300));
   flush();
 })();

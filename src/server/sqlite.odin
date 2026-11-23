@@ -13,6 +13,7 @@ SQLITE_OK :: 0
 SQLITE_ROW :: 100
 SQLITE_DONE :: 101
 SQLITE_CONSTRAINT :: 19
+SQLITE_OPEN_READONLY :: 1
 SQLITE_OPEN_READWRITE :: 0x00000002
 SQLITE_OPEN_CREATE :: 0x00000004
 SQLITE_TRANSIENT :: ~uintptr(0)
@@ -61,9 +62,11 @@ sql_prepare :: proc(db: ^Sqlite, sql: string, args: ..Sql_Value) -> (^Stmt, bool
 		case f64:
 			rc = bind_double(st, idx, v)
 		case string:
-			rc = bind_text(st, idx, raw_data(v), i32(len(v)), SQLITE_TRANSIENT)
+			ptr := raw_data(v) if len(v) > 0 else raw_data(string("\x00"))
+			rc = bind_text(st, idx, ptr, i32(len(v)), SQLITE_TRANSIENT)
 		case []u8:
-			rc = bind_blob(st, idx, raw_data(v), i32(len(v)), SQLITE_TRANSIENT)
+			ptr := raw_data(v) if len(v) > 0 else raw_data(string("\x00"))
+			rc = bind_blob(st, idx, ptr, i32(len(v)), SQLITE_TRANSIENT)
 		}
 		if rc != SQLITE_OK {
 			finalize(st)

@@ -2,6 +2,9 @@ package server
 
 import "core:fmt"
 import "core:math"
+import "core:strings"
+
+import "core:mem/virtual"
 
 // Totals are disposable. Per-result summaries are the source for a repair.
 // A repair within an upload includes the new result, already in its transaction.
@@ -75,7 +78,9 @@ db_history_add :: proc(conn: ^Sqlite, s: Stored, data: []u8) {
 	st, ok := sql_prepare(conn, "SELECT data FROM history_totals WHERE user_id = ? AND setup = ?", s.user_id, key)
 	decoded := false
 	if ok {
-		if step(st) == SQLITE_ROW {
+		row := step(st)
+		if row == SQLITE_DONE do decoded = true
+		if row == SQLITE_ROW {
 			blob := ([^]u8)(column_blob(st, 0))[:int(column_bytes(st, 0))]
 			decoded = history_totals_decode(&g, blob)
 		}
@@ -94,6 +99,11 @@ db_history_add :: proc(conn: ^Sqlite, s: Stored, data: []u8) {
 
 // The caller supplies a transaction, whether startup, upload, claim or repair.
 db_history_rebuild :: proc(conn: ^Sqlite, user_id: i64) -> bool {
+	scratch: virtual.Arena
+	_ = virtual.arena_init_growing(&scratch)
+	defer virtual.arena_destroy(&scratch)
+	context.allocator = virtual.arena_allocator(&scratch)
+	context.temp_allocator = context.allocator
 	fmt.printfln("event=history_totals_rebuild user=%d", user_id)
 	groups := make(map[string]History_Group)
 	st, ok := sql_prepare(conn, `SELECT ` + COLUMNS + `, a.version, a.data FROM results r
@@ -127,6 +137,20 @@ db_history_load :: proc(conn: ^Sqlite, g: ^History_Group, user_id: i64) -> bool 
 	blob := ([^]u8)(column_blob(st, 0))[:int(column_bytes(st, 0))]
 	decoded := history_group()
 	if !history_totals_decode(&decoded, blob) || decoded.analysed > len(g.valid) do return false
+	// Older unreplayable records legitimately have no summary. Distinguish
+	// those from a missing total followed by a newly saved test.
+	if decoded.analysed < len(g.valid) {
+		setup := g.setup.setup
+		field := "qgroup" if setup.mode == .Quote else "mode2"
+		value := g.setup.qgroup if setup.mode == .Quote else setup.mode2
+		count, ready := sql_prepare(conn, strings.concatenate({
+			"SELECT count(*) FROM results r JOIN result_analytics a ON a.result_id=r.id WHERE r.user_id=? AND r.valid=1 AND r.mode=? AND r.",
+			field, "=? AND r.language=? AND r.punctuation=? AND r.numbers=? AND a.version=?",
+		}), user_id, i64(setup.mode), i64(value), setup.language, i64(.Punctuation in setup.flags), i64(.Numbers in setup.flags), i64(ANALYTICS_VERSION))
+		if !ready do return false
+		defer finalize(count)
+		if step(count) != SQLITE_ROW || column_int64(count, 0) != i64(decoded.analysed) do return false
+	}
 	g.analysed, g.pace_tests = decoded.analysed, decoded.pace_tests
 	g.pace_seconds, g.thirds, g.errors = decoded.pace_seconds, decoded.thirds, decoded.errors
 	g.inserts, g.deletes, g.pauses = decoded.inserts, decoded.deletes, decoded.pauses
