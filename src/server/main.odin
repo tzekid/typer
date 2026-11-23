@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:crypto"
 import "core:fmt"
 import "core:net"
+import "core:mem/virtual"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -24,6 +25,7 @@ g_db: Db
 g_packs: string
 g_origin: string
 g_languages: []string
+g_language_flags: map[string]engine.Pack_Flags
 
 main :: proc() {
 	args := os.args[1:]
@@ -66,7 +68,16 @@ cmd_doctor :: proc(args: []string) {
 	if len(args) != 1 {
 		usage()
 	}
-	open_db(args[0])
+	path := db_path(args[0])
+	if _, err := os.stat(path, context.temp_allocator); err == .Not_Exist {
+		fmt.println("ok (new database)")
+		return
+	}
+	if open_v2(strings.clone_to_cstring(path), &g_db.conn, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
+		fmt.eprintln("doctor: cannot open database read-only")
+		os.exit(1)
+	}
+	defer db_close(&g_db)
 	if r := db_check(&g_db); r != "ok" {
 		fmt.eprintfln("doctor: quick_check: %s", r)
 		os.exit(1)
@@ -82,7 +93,7 @@ cmd_claim :: proc(args: []string) {
 		if args[2] != "--origin" {
 			usage()
 		}
-		g_origin = args[3]
+		g_origin = strings.trim_right(args[3], "/")
 	}
 	name, ok := clean_name(args[1])
 	if !ok {
@@ -115,7 +126,7 @@ cmd_serve :: proc(args: []string) {
 		case "--packs":
 			g_packs = args[i + 1]
 		case "--origin":
-			g_origin = args[i + 1]
+			g_origin = strings.trim_right(args[i + 1], "/")
 		case:
 			usage()
 		}
@@ -130,6 +141,7 @@ cmd_serve :: proc(args: []string) {
 		os.exit(1)
 	}
 	open_db(data_dir)
+	defer db_close(&g_db)
 	if !load_languages() || !load_quotes() {
 		os.exit(1)
 	}
@@ -152,9 +164,14 @@ load_languages :: proc() -> bool {
 		return false
 	}
 	names := make([dynamic]string)
+	g_language_flags = make(map[string]engine.Pack_Flags)
 	for line in strings.split_lines(string(data)) {
-		if tab := strings.index_byte(line, '\t'); tab > 0 {
-			append(&names, line[:tab])
+		fields := strings.split(line, "\t")
+		if len(fields) == 3 {
+			flags, valid := strconv.parse_u64(fields[2], 10)
+			if !valid do return false
+			g_language_flags[fields[0]] = transmute(engine.Pack_Flags)u32(flags)
+			append(&names, fields[0])
 		}
 	}
 	g_languages = names[:]
@@ -200,12 +217,15 @@ route :: proc(req: ^Request, res: ^Response) {
 		leaderboard_page(req, res)
 	case p == "/me" && get:
 		me_page(req, res)
+	case p == "/me/session" && post:
+		if !valid_token(cookie(req, ID_COOKIE)) do set_header(res, "set-cookie", id_cookie(new_token()))
+		respond_text(res, 200, "ok")
 	case p == "/me/name" && post:
 		rename(req, res)
 	case p == "/me/forget" && post:
 		set_header(res, "set-cookie", clear_id_cookie())
 		redirect(res, "/")
-	case strings.has_prefix(p, "/key/") && get:
+	case p == "/key" && post, strings.has_prefix(p, "/key/") && get:
 		use_key(req, res)
 	case p == "/settings" && get:
 		settings_page(req, res)
@@ -224,7 +244,21 @@ route :: proc(req: ^Request, res: ^Response) {
 			respond_text(res, 500, r)
 		}
 	case:
-		respond_text(res, 404 if get || post else 405, "not found" if get || post else "method not allowed")
+		allow := ""
+		switch {
+		case p == "/results", p == "/me/session", p == "/me/forget", p == "/me/name", p == "/key", p == "/theme":
+			allow = "POST"
+		case p == "/settings":
+			allow = "GET, HEAD, POST"
+		case p == "/", p == "/healthz", p == "/readyz", p == "/history", p == "/leaderboard", p == "/me", p == "/quotes", p == "/languages", strings.has_prefix(p, "/results/"), strings.has_prefix(p, "/key/"), strings.has_prefix(p, "/assets/"), strings.has_prefix(p, "/packs/"):
+			allow = "GET, HEAD"
+		}
+		if allow == "" {
+			respond_text(res, 404, "not found")
+		} else {
+			set_header(res, "allow", allow)
+			respond_text(res, 405, "method not allowed")
+		}
 	}
 }
 
@@ -233,7 +267,7 @@ route :: proc(req: ^Request, res: ^Response) {
 @(private)
 same_origin :: proc(req: ^Request) -> bool {
 	o := header(req, "origin")
-	return o == "" || g_origin == "" || o == g_origin
+	return header(req, "sec-fetch-site") != "cross-site" && (g_origin == "" || o == g_origin)
 }
 
 @(private)
@@ -283,7 +317,9 @@ setup_from_query :: proc(q: string) -> (s: Test_Setup, ok: bool) {
 		return s, false
 	}
 	if s.mode == .Quote {
-		g, gok := strconv.parse_int(query_value(q, "q"), 10)
+		raw := query_value(q, "q")
+		g, gok := strconv.parse_int(raw, 10)
+		if raw != "" && !gok do return s, false
 		if gok {
 			if g < 1 || g > int(QUOTE_ALL) {
 				return s, false
@@ -318,9 +354,7 @@ test_page :: proc(req: ^Request, res: ^Response) {
 			return
 		}
 		s = qs
-		q := strings.builder_make()
-		setup_query(&q, s)
-		set_header(res, "set-cookie", strings.concatenate({SETUP_COOKIE, "=", url_encode(strings.to_string(q)), LONG_COOKIE, "; HttpOnly"}))
+
 	} else if c := cookie(req, SETUP_COOKIE); c != "" {
 		if cs, ok := setup_from_query(c); ok {
 			s = cs
@@ -332,7 +366,10 @@ test_page :: proc(req: ^Request, res: ^Response) {
 		if collection == nil {
 			s.mode = .Words
 			s.mode2 = 25
-			page.setup = s
+			q := strings.builder_make()
+			setup_query(&q, s)
+			redirect(res, strings.concatenate({"/?", strings.to_string(q)}))
+			return
 		} else {
 			seed, pos, ok := parse_queue(cookie(req, QUEUE_COOKIE))
 			if !ok {
@@ -349,6 +386,11 @@ test_page :: proc(req: ^Request, res: ^Response) {
 			page.from = pos
 			page.quotes = deal_quotes(collection, s.quotes, seed, pos, DEAL)
 		}
+	}
+	if req.query != "" {
+		q := strings.builder_make()
+		setup_query(&q, s)
+		set_header(res, "set-cookie", strings.concatenate({SETUP_COOKIE, "=", url_encode(strings.to_string(q)), LONG_COOKIE, "; HttpOnly"}))
 	}
 	b := strings.builder_make()
 	render_test_page(&b, page_for(req), page)
@@ -381,7 +423,7 @@ serve_pack :: proc(req: ^Request, res: ^Response) {
 		return
 	}
 	// build.sh compresses every pack: the large lists shrink about five times.
-	br := strings.contains(header(req, "accept-encoding"), "br")
+	br := encoding_quality(header(req, "accept-encoding"), "br") > 0
 	data, ok := pack_mapping(strings.concatenate({name, ".bin.br" if br else ".bin"}))
 	if !ok {
 		respond_text(res, 404, "not found")
@@ -390,11 +432,9 @@ serve_pack :: proc(req: ^Request, res: ^Response) {
 	res.type = "application/octet-stream"
 	res.cache = "public, max-age=86400"
 	res.body = data
-	if br {
-		res.encoding = "br"
-	} else {
-		set_header(res, "vary", "accept-encoding")
-	}
+	res.shared_body = true
+	set_header(res, "vary", "accept-encoding")
+	if br do res.encoding = "br"
 }
 
 // Packs are up to 10 MB and stay on the wire as long as the client takes to
@@ -430,6 +470,48 @@ pack_mapping :: proc(file: string) -> ([]u8, bool) {
 	return data, true
 }
 
+// Cache validated read-only pack views; verifying a result only visits its words.
+g_word_lists: map[string]engine.Word_List
+
+generated_targets :: proc(t: ^engine.Test, setup: engine.Setup, events: int) -> bool {
+	n := int(engine.word_count(t))
+	bound := int(setup.mode2) if setup.mode == .Words else int(max(i32))
+	if n < min(bound, engine.WORDS_AHEAD) || n > min(bound, events + engine.WORDS_AHEAD) do return false
+	list, found := g_word_lists[setup.language]
+	if !found {
+		data, mapped := pack_mapping(strings.concatenate({setup.language, ".bin"}))
+		if !mapped do return false
+		pack, valid := engine.pack_view(data)
+		if !valid || pack.list.name != setup.language do return false
+		if g_word_lists == nil do g_word_lists = make(map[string]engine.Word_List, runtime.heap_allocator())
+		list = pack.list
+		g_word_lists[list.name] = list
+	}
+	variant: engine.Generator
+	engine.generator_init(&variant, list, setup.seed, .Punctuation in setup.flags, .Numbers in setup.flags)
+	variant.legacy = setup.version == 1
+	scratch: virtual.Arena
+	_ = virtual.arena_init_growing(&scratch)
+	defer virtual.arena_destroy(&scratch)
+	context.temp_allocator = virtual.arena_allocator(&scratch)
+	for i in 0 ..< n {
+		virtual.arena_free_all(&scratch)
+		expected := engine.generator_next(&variant, i, bound)
+		target := engine.target_word(t, i32(i))
+		if i != bound - 1 {
+			if len(target) == 0 || target[len(target)-1] != ' ' do return false
+			target = target[:len(target)-1]
+		}
+		index := 0
+		for ch in expected {
+			if index == len(target) || target[index] != ch do return false
+			index += 1
+		}
+		if index != len(target) do return false
+	}
+	return true
+}
+
 Replayed :: struct {
 	view:  engine.Result_View,
 	test:  engine.Test,
@@ -438,13 +520,14 @@ Replayed :: struct {
 
 // Re-derives everything about a test from its record, and for quotes checks
 // that the words typed are that quote's.
-replay :: proc(record: []u8) -> (r: Replayed, ok: bool) {
+replay :: proc(record: []u8, upload := false) -> (r: Replayed, ok: bool) {
 	setup, events, dok := engine.record_decode(record, &r.test)
 	if !dok {
 		return {}, false
 	}
 	switch setup.mode {
 	case .Quote:
+		if .Numbers in setup.flags || .Punctuation in setup.flags do return {}, false
 		c := g_quotes[setup.language]
 		if c == nil {
 			return {}, false
@@ -458,6 +541,7 @@ replay :: proc(record: []u8) -> (r: Replayed, ok: bool) {
 		if !known_language(setup.language) || setup.mode2 < 1 || setup.mode2 > MODE2_MAX {
 			return {}, false
 		}
+		if upload && !generated_targets(&r.test, setup, len(events)) do return {}, false
 		// The island deals a words test exactly its count of words.
 		if setup.mode == .Words && engine.word_count(&r.test) != setup.mode2 {
 			return {}, false
@@ -467,6 +551,16 @@ replay :: proc(record: []u8) -> (r: Replayed, ok: bool) {
 	}
 	if !engine.record_replay(&r.test, events) {
 		return {}, false
+	}
+	if upload && setup.mode == .Time {
+		// Every advance deals one more target, even if the typist later backspaces.
+		furthest := 0
+		for e in r.test.inputs {
+			position := int(e.word_index)
+			if .Commits_Word in e.flags && .Input_Stopped not_in e.flags do position += 1
+			furthest = max(furthest, position)
+		}
+		if int(engine.word_count(&r.test)) != furthest + engine.WORDS_AHEAD do return {}, false
 	}
 	// The island ends a time test exactly mode2 seconds after it began, so a
 	// result filed under a length is one of that length.
@@ -502,23 +596,14 @@ post_result :: proc(req: ^Request, res: ^Response) {
 		respond_text(res, 429, "slow down")
 		return
 	}
-	r, ok := replay(req.body)
+	r, ok := replay(req.body, upload = true)
 	if !ok {
 		respond_text(res, 400, "not a complete typer record")
 		return
 	}
-	user, _, known := current_user(req)
-	if !known {
-		token := new_token()
-		u, created := db_create_user(&g_db, token_sha(token), now_ms())
-		if !created {
-			respond_text(res, 500, "could not create a typist")
-			return
-		}
-		user = u
-		set_header(res, "set-cookie", id_cookie(token))
-	}
-	v := r.view
+	user, token, known := current_user(req)
+	if !known && !valid_token(token) do token = new_token()
+		v := r.view
 	stored := Stored {
 		created_at = now_ms(),
 		setup      = v.setup,
@@ -531,7 +616,16 @@ post_result :: proc(req: ^Request, res: ^Response) {
 		valid      = v.invalid == "",
 		user_id    = user.id,
 	}
-	id, created, iok := db_insert_result(&g_db, stored, req.body, analysis_encode(analyse_test(&r.test)))
+	id, created, iok := db_insert_result(&g_db, stored, req.body, analysis_encode(analyse_test(&r.test)), token)
+	if iok && id == 0 {
+		respond_text(res, 409, "result belongs to another typist")
+		return
+	}
+	if iok && !known {
+		set_header(res, "set-cookie", id_cookie(token))
+		user, _ = db_user_by_token(&g_db, token_sha(token))
+	}
+	if iok do set_header(res, "x-typist", url_encode(user.name))
 	if !iok {
 		fmt.eprintfln("event=insert_failed error=%q", sql_error(g_db.conn))
 		respond_text(res, 500, "could not store result")
@@ -681,6 +775,7 @@ rename :: proc(req: ^Request, res: ^Response) {
 @(private)
 use_key :: proc(req: ^Request, res: ^Response) {
 	token := strings.trim_prefix(req.path, "/key/")
+	if req.method == "POST" do token = query_value(string(req.body), "token")
 	if !valid_token(token) {
 		respond_text(res, 404, "not found")
 		return
@@ -689,8 +784,18 @@ use_key :: proc(req: ^Request, res: ^Response) {
 		respond_text(res, 404, "not found")
 		return
 	}
+	if req.method != "POST" {
+		b := strings.builder_make()
+		page := page_for(req)
+		page_start(&b, page, "Use a typist key", "key")
+		strings.write_string(&b, `<h1>Use this typist key?</h1>`)
+		if page.known do strings.write_string(&b, `<p>This changes the typist on this browser. Save your <a href="/me">current key link</a> first.</p>`)
+		fmt.sbprintf(&b, `<form action="/key" method="post"><input type="hidden" name="token" value="%s"><button>Use this key</button></form>`, token)
+		page_end(&b)
+		html_response(res, &b)
+		return
+	}
 	set_header(res, "set-cookie", id_cookie(token))
-	set_header(res, "referrer-policy", "no-referrer")
 	redirect(res, "/me?m=welcome")
 }
 
@@ -742,7 +847,7 @@ toggle_theme :: proc(req: ^Request, res: ^Response) {
 	if g_origin != "" && strings.has_prefix(ref, g_origin) {
 		back = ref[len(g_origin):]
 	}
-	if !strings.has_prefix(back, "/") || strings.has_prefix(back, "//") {
+	if !strings.has_prefix(back, "/") || strings.has_prefix(back, "//") || strings.contains(back, "\\") {
 		back = "/"
 	}
 	redirect(res, back)

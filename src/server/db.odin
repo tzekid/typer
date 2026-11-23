@@ -92,6 +92,13 @@ MIGRATIONS := [?]string {
 	DELETE FROM history_totals;
 	DELETE FROM result_analytics WHERE version > 0 AND version < 2;
 	`,
+	// 4: regenerate derived counts, including whitespace-only quote lines.
+	`
+	CREATE INDEX results_quote_board ON results(mode, qgroup, language, user_id, wpm DESC, acc DESC, id)
+		WHERE valid = 1 AND punctuation = 0 AND numbers = 0 AND user_id IS NOT NULL;
+	DELETE FROM history_totals;
+	DELETE FROM result_analytics;
+	`,
 }
 
 db_open :: proc(db: ^Db, path: string) -> (err: string, ok: bool) {
@@ -100,17 +107,14 @@ db_open :: proc(db: ^Db, path: string) -> (err: string, ok: bool) {
 		return sql_error(db.conn), false
 	}
 	busy_timeout(db.conn, 5000)
+	st, pok := sql_prepare(db.conn, "PRAGMA user_version")
+	if !pok do return sql_error(db.conn), false
+	row := step(st)
+	version := int(column_int64(st, 0))
+	finalize(st)
+	if row != SQLITE_ROW || version > len(MIGRATIONS) do return "unsupported database schema", false
 	msg: cstring
-	if exec(db.conn, SCHEMA, nil, nil, &msg) != SQLITE_OK {
-		return string(msg), false
-	}
-	version := 0
-	if st, pok := sql_prepare(db.conn, "PRAGMA user_version"); pok {
-		if step(st) == SQLITE_ROW {
-			version = int(column_int64(st, 0))
-		}
-		finalize(st)
-	}
+	if exec(db.conn, SCHEMA, nil, nil, &msg) != SQLITE_OK do return string(msg), false
 	for i in version ..< len(MIGRATIONS) {
 		script := strings.concatenate({"BEGIN;", MIGRATIONS[i], "PRAGMA user_version = ", itoa(i + 1), "; COMMIT;"}, context.temp_allocator)
 		if exec(db.conn, strings.clone_to_cstring(script, context.temp_allocator), nil, nil, &msg) != SQLITE_OK {
@@ -187,7 +191,6 @@ db_user_by_token :: proc(db: ^Db, sha: string, allocator := context.allocator) -
 
 // A new typist with a generated name (retried on the rare collision).
 db_create_user :: proc(db: ^Db, sha: string, created_at: i64) -> (User, bool) {
-	sync.guard(&db.lock)
 	for _ in 0 ..< 8 {
 		name := generated_name()
 		rc := sql_exec(db.conn, "INSERT INTO users (token_sha, name, created_at) VALUES (?, ?, ?)", sha, name, created_at)
@@ -254,12 +257,29 @@ db_claim :: proc(db: ^Db, name: string, created_at: i64) -> (token: string, clai
 
 // Inserts a result, or returns the existing id when the same record was
 // already stored (an outbox retry after a lost response).
-db_insert_result :: proc(db: ^Db, s: Stored, record: []u8, analysis: []u8) -> (id: i64, created: bool, ok: bool) {
+db_insert_result :: proc(db: ^Db, stored: Stored, record: []u8, analysis: []u8, token: string) -> (id: i64, created: bool, ok: bool) {
 	sync.guard(&db.lock)
+	s := stored
 	sha := record_sha(record)
 	if sql_exec(db.conn, "BEGIN IMMEDIATE") != SQLITE_DONE do return 0, false, false
 	committed := false
 	defer if !committed do sql_exec(db.conn, "ROLLBACK")
+	st, pok := sql_prepare(db.conn, "SELECT id, user_id FROM results WHERE record_sha = ?", sha)
+	if !pok do return 0, false, false
+	row := step(st)
+	if row == SQLITE_ROW {
+		existing, owner := column_int64(st, 0), column_int64(st, 1)
+		finalize(st)
+		if owner == 0 || owner != s.user_id do return 0, false, true
+		return existing, false, true
+	}
+	finalize(st)
+	if row != SQLITE_DONE do return 0, false, false
+	if s.user_id == 0 {
+		user, made := db_create_user(db, token_sha(token), s.created_at)
+		if !made do return 0, false, false
+		s.user_id = user.id
+	}
 	rc := sql_exec(
 		db.conn,
 		`INSERT INTO results (created_at, mode, mode2, language, punctuation, numbers, wpm, raw, acc, consistency, duration, valid, record_sha, record, user_id, qgroup)
@@ -291,18 +311,7 @@ db_insert_result :: proc(db: ^Db, s: Stored, record: []u8, analysis: []u8) -> (i
 		history_invalidate(db, s.user_id)
 		return id, true, true
 	}
-	if rc != SQLITE_CONSTRAINT {
-		return 0, false, false
-	}
-	st, pok := sql_prepare(db.conn, "SELECT id FROM results WHERE record_sha = ?", sha)
-	if !pok {
-		return 0, false, false
-	}
-	defer finalize(st)
-	if step(st) != SQLITE_ROW {
-		return 0, false, false
-	}
-	return column_int64(st, 0), false, true
+	return 0, false, false
 }
 
 db_get_record :: proc(db: ^Db, id: i64, allocator := context.allocator) -> (record: []u8, s: Stored, ok: bool) {

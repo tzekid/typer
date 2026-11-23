@@ -83,24 +83,18 @@ quote_pack_view :: proc(data: []u8) -> (p: Quote_Pack, ok: bool) {
 	for g in 0 ..< QUOTE_GROUPS {
 		p.groups[g] = {get_u32(data, 8 + g * 8), get_u32(data, 12 + g * 8)}
 	}
-	name_len := int(get_u32(data, 40))
-	at := 44 + name_len
-	if at > len(data) {
-		return {}, false
-	}
-	p.language = string(data[44:at])
-	for at % 4 != 0 {
-		at += 1
-	}
-	records_end := at + n * size_of(Quote_Record)
-	if n < 0 || records_end > len(data) {
-		return {}, false
-	}
+	name_len := u64(get_u32(data, 40))
+	start := u64(44) + name_len
+	aligned := (start + 3) & ~u64(3)
+	end := aligned + (u64(get_u32(data, 4))) * size_of(Quote_Record)
+	if end > u64(len(data)) || uintptr(raw_data(data)) % 4 != 0 do return {}, false
+	p.language = string(data[44:int(start)])
+	at, records_end := int(aligned), int(end)
 	p.records = ([^]Quote_Record)(raw_data(data[at:]))[:n]
 	p.blob = data[records_end:]
 	prev: u32
-	for r in p.records {
-		if r.id <= prev && prev != 0 || r.group >= QUOTE_GROUPS || int(r.text_off) + int(r.text_len) > len(p.blob) || int(r.source_off) + int(r.source_len) > len(p.blob) {
+	for r, i in p.records {
+		if i > 0 && r.id <= prev || r.group >= QUOTE_GROUPS || u64(r.text_off) + u64(r.text_len) > u64(len(p.blob)) || u64(r.source_off) + u64(r.source_len) > u64(len(p.blob)) {
 			return {}, false
 		}
 		prev = r.id

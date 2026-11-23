@@ -86,7 +86,7 @@ page_start :: proc(b: ^strings.Builder, p: Page, title: string, kind: string, pr
 	w(b, `" data-wasm="`)
 	w(b, asset_url("core.wasm"))
 	w(b, `" defer></script></head><body><header class="top"><a class="mark" href="/">&lt;{ typer }&gt;</a>`)
-	w(b, `<form class="theme" method="post" action="/theme"><button type="submit" data-theme-toggle aria-label="Switch between light and dark">&lt;{ <span class="glyph"></span> }&gt;</button></form><nav>`)
+	w(b, `<form class="theme" method="post" action="/theme"><button type="submit" data-theme-toggle aria-label="Switch between light and dark">&lt;{ <span class="glyph"></span> }&gt;</button></form><nav aria-label="Main navigation">`)
 	for item in ([?][3]string{{"/", "play", "test"}, {"/leaderboard", "leaderboard", "leaderboard"}, {"/history", "history", "history"}, {"/settings", "settings", "settings"}}) {
 		w(b, `<a href="`)
 		w(b, item[0])
@@ -106,6 +106,11 @@ page_start :: proc(b: ^strings.Builder, p: Page, title: string, kind: string, pr
 	w(b, `</nav></header><main tabindex="-1" data-page="`)
 	w(b, kind)
 	w(b, `">`)
+	if kind != "history" && kind != "key" {
+		w(b, `<h1 class="sr-only">`)
+		engine.html_text(b, title)
+		w(b, `</h1>`)
+	}
 }
 
 @(private)
@@ -276,11 +281,12 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	engine.html_text(b, engine.quote_language(s.language) if s.mode == .Quote else s.language)
 	w(b, `</a></nav>`)
 
+	w(b, `<noscript><p>Enable JavaScript to take a typing test.</p></noscript>`)
 	w(b, `<section id="stage" class="stage"><div id="timer" class="timer" aria-hidden="true"></div>`)
 	w(b, `<div class="lines-clip"><div id="lines" class="lines"><canvas id="words"></canvas><div id="caret" class="caret idle" aria-hidden="true"></div></div></div>`)
 	w(b, `<textarea id="typer-input" class="typer-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="typing input"></textarea>`)
-	w(b, `<div id="result" hidden></div><div id="after" class="after" hidden><button type="button" data-next>next test <kbd>tab</kbd></button>`)
-	w(b, `<button type="button" class="quiet" data-repeat>repeat <kbd>esc</kbd></button><a data-result-link hidden>saved result</a></div>`)
+	w(b, `<div id="result" hidden></div><div id="after" class="after" hidden><button type="button" data-next>next test</button>`)
+	w(b, `<button type="button" class="quiet" data-repeat>repeat <kbd>esc</kbd></button><span data-save-status role="status"></span><a data-result-link hidden>saved result</a></div>`)
 	w(b, `<p id="words-text" class="sr-only" aria-live="polite"></p></section>`)
 	w(b, `<p id="hint" class="hint"><kbd>tab</kbd> restart · twice for `)
 	w(b, "a new quote" if s.mode == .Quote else "new words")
@@ -296,6 +302,10 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	w(b, "true" if s.numbers else "false")
 	w(b, `,"language":`)
 	engine.json_string(b, s.language)
+	flags := g_language_flags[s.language]
+	if s.mode == .Quote do flags = g_language_flags[engine.quote_language(s.language)]
+	if .Right_To_Left in flags do w(b, `,"rtl":true`)
+	if .Joining_Script in flags do w(b, `,"joining":true`)
 	w(b, `,"pack":`)
 	engine.json_string(b, strings.concatenate({"/packs/", s.language, ".bin"}, context.temp_allocator))
 	w(b, `,"caretMs":`)
@@ -317,7 +327,7 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 }
 
 render_result_page :: proc(b: ^strings.Builder, p: Page, v: engine.Result_View, attempts: []Stored) {
-	page_start(b, p, "result · typer", "result")
+	page_start(b, p, "result · typer", "result", {"DMMono-latin.woff2"})
 	engine.render_result(b, v)
 	if len(attempts) > 1 {
 		w(b, `<h2>`)
@@ -325,7 +335,9 @@ render_result_page :: proc(b: ^strings.Builder, p: Page, v: engine.Result_View, 
 		w(b, ` on this quote</h2>`)
 		results_table(b, attempts, false, 0, v.id)
 	}
-	w(b, `<p class="after"><a class="button" href="/">play</a><a class="button quiet" href="/leaderboard">leaderboard</a></p>`)
+	w(b, `<p class="after"><a class="button" href="/">play</a><a class="button quiet" href="`)
+	board_href(b, Board{mode = v.setup.mode, mode2 = v.setup.mode2, language = v.setup.language, qgroup = v.quote_group})
+	w(b, `">leaderboard</a></p>`)
 	page_end(b)
 }
 
@@ -346,7 +358,7 @@ setup_label :: proc(b: ^strings.Builder, s: Stored) {
 // current: a result id to mark.
 @(private)
 results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlight: i64, current: i64) {
-	w(b, `<table><thead><tr>`)
+	w(b, `<div class="results-scroll"><table><thead><tr>`)
 	if ranked {
 		w(b, `<th class="num">#</th><th>typist</th>`)
 	} else {
@@ -403,7 +415,7 @@ results_table :: proc(b: ^strings.Builder, rows: []Stored, ranked: bool, highlig
 		}
 		w(b, `</tr>`)
 	}
-	w(b, `</tbody></table>`)
+	w(b, `</tbody></table></div>`)
 }
 
 BOARD_TIMES := [?]i32{15, 30, 60, 120}
@@ -476,7 +488,11 @@ render_leaderboard_page :: proc(b: ^strings.Builder, p: Page, board: Board, rows
 	} else {
 		results_table(b, rows, true, p.user.id if p.known else 0, 0)
 	}
-	w(b, `<p class="note">Each typist's best valid result, without punctuation or numbers.</p>`)
+	if board.mode == .Quote {
+		w(b, `<p class="note">Each typist's best valid quote in this length group.</p>`)
+	} else {
+		w(b, `<p class="note">Each typist's best valid result, without punctuation or numbers.</p>`)
+	}
 	page_end(b)
 }
 
@@ -539,7 +555,7 @@ render_languages_page :: proc(b: ^strings.Builder, p: Page, s: Test_Setup, board
 			setup_href(b, x)
 		}
 		w(b, `"`)
-		if l == s.language do w(b, ` class="on"`)
+		if l == (engine.quote_language(s.language) if s.mode == .Quote else s.language) do w(b, ` class="on"`)
 		w(b, `>`)
 		engine.html_text(b, l)
 		w(b, `</a></li>`)

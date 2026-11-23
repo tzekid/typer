@@ -124,6 +124,7 @@ Test :: struct {
 	active:              i32,
 	bailed_out:          bool,
 	all_generated:       bool,
+	has_newline:         bool,
 	first_rendered_word: i32, // words before this have scrolled off and can't be backspaced into
 
 	target:              [dynamic]rune,
@@ -150,6 +151,7 @@ test_reset :: proc(t: ^Test, cfg: Config) {
 	t.active = 0
 	t.bailed_out = false
 	t.all_generated = false
+	t.has_newline = false
 	t.first_rendered_word = 0
 	clear(&t.target)
 	clear(&t.target_off)
@@ -182,7 +184,9 @@ test_destroy :: proc(t: ^Test) {
 
 // commit: ' ' or '\n' after the word, 0 for the final word of a finite test.
 test_add_word :: proc(t: ^Test, text: string, commit: rune) {
+	if commit == '\n' do t.has_newline = true
 	for r in text {
+		if r == '\n' do t.has_newline = true
 		append(&t.target, r)
 	}
 	if commit != 0 {
@@ -314,23 +318,13 @@ should_go_to_next_word :: proc(t: ^Test, data: rune, input: []rune, target: []ru
 	return true
 }
 
-@(private)
-words_have_newline :: proc(t: ^Test) -> bool {
-	for r in t.target {
-		if r == '\n' {
-			return true
-		}
-	}
-	return false
-}
-
 // onBeforeInsertText: false means the browser insertion must be prevented.
 // The layout-dependent overflow check lives with the layout code.
 test_before_insert :: proc(t: ^Test, data: rune) -> bool {
 	if t.phase >= .Finishing {
 		return false
 	}
-	if data == '\n' && t.cfg.mode != .Zen && !words_have_newline(t) {
+	if data == '\n' && t.cfg.mode != .Zen && !t.has_newline {
 		return false
 	}
 	input := word_input(t, t.active)
@@ -458,7 +452,9 @@ test_delete :: proc(t: ^Test, ms: f64, kind: Delete_Kind, remaining: i32) {
 	before := i32(len(word_input(t, t.active)))
 
 	if remaining == DELETE_INTO_PREVIOUS {
+		cleared := before != 0 && t.active > 0
 		if t.active > 0 {
+			input_truncate(t, t.active, 0)
 			t.active -= 1
 			if kind == .Word {
 				input_truncate(t, t.active, 0)
@@ -480,7 +476,7 @@ test_delete :: proc(t: ^Test, ms: f64, kind: Delete_Kind, remaining: i32) {
 			char_index = after,
 			input_len  = after,
 		}
-		if before != 0 do ev.flags += {.Cleared_Next_Word}
+		if cleared do ev.flags += {.Cleared_Next_Word}
 		append(&t.inputs, ev)
 		return
 	}

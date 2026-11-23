@@ -1,12 +1,15 @@
 package server
 
 import "base:runtime"
+import "base:intrinsics"
+import "core:sys/posix"
 import "core:fmt"
 import "core:mem/virtual"
 import "core:nbio"
 import "core:net"
-import "core:strconv"
+import "core:encoding/hex"
 import "core:strings"
+import "core:slice"
 import "core:time"
 
 // HTTP/1.1 for many concurrent visitors behind Caddy: one event loop
@@ -34,6 +37,7 @@ Header :: struct {
 }
 
 Request :: struct {
+	peer:       net.Address,
 	method:     string,
 	path:       string,
 	query:      string,
@@ -47,6 +51,7 @@ Response :: struct {
 	type:     string,
 	cache:    string,
 	encoding: string,
+	shared_body: bool, // immutable asset or mapped pack with process lifetime
 	body:     []u8,
 	headers:  [dynamic]Header,
 }
@@ -114,13 +119,16 @@ status_text :: proc(code: int) -> string {
 	return "Unknown"
 }
 
-SECURITY_HEADERS :: "content-security-policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n" + "x-content-type-options: nosniff\r\n" + "referrer-policy: same-origin\r\n" + "x-frame-options: DENY\r\n"
+SECURITY_HEADERS :: "content-security-policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n" + "x-content-type-options: nosniff\r\n" + "referrer-policy: no-referrer\r\n" + "x-frame-options: DENY\r\n"
 
 @(private)
 Conn :: struct {
 	sock:     net.TCP_Socket,
+	peer:     net.Address,
 	loop:     ^Loop,
 	have:     int,
+	body_remaining: int,
+	response_bytes: int,
 	started:  time.Tick, // first byte of the request being read
 	req:      Request,
 	res:      Response,
@@ -134,10 +142,17 @@ Loop :: struct {
 	listener:    net.TCP_Socket,
 	handler:     Handler,
 	connections: int,
+	responses:   int,
 	bodies:      int, // bytes of request bodies being received or handled
 }
 
-// Serves forever.
+@(private)
+stopping: bool
+
+request_shutdown :: proc "c" (_: posix.Signal) {
+	intrinsics.volatile_store(&stopping, true)
+}
+
 serve :: proc(listen: net.Endpoint, handler: Handler) -> bool {
 	listener, err := net.listen_tcp(listen)
 	if err != nil {
@@ -146,8 +161,9 @@ serve :: proc(listen: net.Endpoint, handler: Handler) -> bool {
 	}
 	_ = net.set_blocking(listener, false)
 	fmt.printfln("event=server_start address=%s", net.endpoint_to_string(listen, context.temp_allocator))
+	_ = posix.signal(.SIGTERM, request_shutdown)
 	run_loop(listener, handler)
-	return false
+	return intrinsics.volatile_load(&stopping)
 }
 
 @(private)
@@ -167,13 +183,25 @@ run_loop :: proc(listener: net.TCP_Socket, handler: Handler) {
 		handler  = handler,
 	}
 	nbio.accept_poly(listener, loop, on_accept)
-	if err := nbio.run(); err != nil {
-		fmt.eprintfln("event=loop_failed error=%v", err)
+	for !intrinsics.volatile_load(&stopping) {
+		if err := nbio.tick(time.Second); err != nil && !intrinsics.volatile_load(&stopping) {
+			fmt.eprintfln("event=loop_failed error=%v", err)
+			return
+		}
+	}
+	nbio.close(listener)
+	started := time.tick_now()
+	for loop.connections > 0 && time.tick_since(started) < 5 * time.Second {
+		_ = nbio.tick(100 * time.Millisecond)
 	}
 }
 
 @(private)
 on_accept :: proc(op: ^nbio.Operation, loop: ^Loop) {
+	if intrinsics.volatile_load(&stopping) {
+		if op.accept.err == nil do nbio.close(op.accept.client)
+		return
+	}
 	nbio.accept_poly(loop.listener, loop, on_accept)
 	if op.accept.err != nil {
 		fmt.eprintfln("event=accept_failed error=%v", op.accept.err)
@@ -185,6 +213,8 @@ on_accept :: proc(op: ^nbio.Operation, loop: ^Loop) {
 	}
 	loop.connections += 1
 	c := new(Conn)
+	ep, _ := net.peer_endpoint(op.accept.client)
+	c.peer = ep.address
 	c.sock = op.accept.client
 	c.loop = loop
 	_ = virtual.arena_init_growing(&c.arena)
@@ -195,6 +225,7 @@ on_accept :: proc(op: ^nbio.Operation, loop: ^Loop) {
 drop :: proc(c: ^Conn) {
 	nbio.close(c.sock)
 	release_body(c)
+	c.loop.responses -= c.response_bytes
 	virtual.arena_destroy(&c.arena)
 	c.loop.connections -= 1
 	free(c)
@@ -276,8 +307,8 @@ next :: proc(c: ^Conn) {
 	}
 
 	virtual.arena_free_all(&c.arena)
-	c.req = {}
-	if !parse_head(string(c.buf[:head_end - 4]), &c.req) {
+	c.req = {peer = c.peer}
+	if !parse_head(strings.clone(string(c.buf[:head_end - 4])), &c.req) {
 		fail(c, 400)
 		return
 	}
@@ -289,8 +320,8 @@ next :: proc(c: ^Conn) {
 	}
 	length := 0
 	if cl := header(&c.req, "content-length"); cl != "" {
-		v, ok := strconv.parse_int(cl, 10)
-		if !ok || v < 0 {
+		v, ok := body_length(cl)
+		if !ok {
 			fail(c, 400)
 			return
 		}
@@ -315,6 +346,7 @@ next :: proc(c: ^Conn) {
 	copy(c.buf[:], c.buf[consumed:c.have])
 	c.have -= consumed
 	c.req.body = body
+	c.body_remaining = length - got
 	if got < length {
 		nbio.recv_poly(c.sock, {body[got:]}, c, on_body, all = true, timeout = BODY_DEADLINE)
 		return
@@ -324,7 +356,7 @@ next :: proc(c: ^Conn) {
 
 @(private)
 on_body :: proc(op: ^nbio.Operation, c: ^Conn) {
-	if op.recv.err != nil || op.recv.received == 0 {
+	if op.recv.err != nil || op.recv.received != c.body_remaining {
 		drop(c)
 		return
 	}
@@ -339,9 +371,30 @@ respond :: proc(c: ^Conn) {
 	c.res = Response {
 		status = 200,
 	}
+	// Analysis and rendering can allocate much more than the finished page.
+	// Release these temporaries before a slow socket starts its send.
+	scratch: virtual.Arena
+	_ = virtual.arena_init_growing(&scratch)
+	defer virtual.arena_destroy(&scratch)
+	context.allocator = virtual.arena_allocator(&scratch)
+	context.temp_allocator = context.allocator
 	c.loop.handler(&c.req, &c.res)
+	head := response_head(&c.req, &c.res)
+	hold := len(head)
+	send_body := c.req.method != "HEAD" && len(c.res.body) > 0
+	if send_body && !c.res.shared_body do hold += len(c.res.body)
+	context.allocator = virtual.arena_allocator(&c.arena)
+	context.temp_allocator = context.allocator
+	if c.loop.responses + hold > BODIES_MAX {
+		release_body(c)
+		fail(c, 503)
+		return
+	}
+	c.response_bytes = hold
+	c.loop.responses += hold
+	c.head_out = slice.clone(head)
+	if send_body && !c.res.shared_body do c.res.body = slice.clone(c.res.body)
 	release_body(c)
-	c.head_out = response_head(&c.req, &c.res)
 	fmt.printfln(
 		"event=request method=%s path=%s status=%d bytes=%d micros=%.0f",
 		c.req.method,
@@ -359,10 +412,12 @@ respond :: proc(c: ^Conn) {
 
 @(private)
 on_sent :: proc(op: ^nbio.Operation, c: ^Conn) {
-	if op.send.err != nil || !c.req.keep_alive {
+	if op.send.err != nil || !c.req.keep_alive || intrinsics.volatile_load(&stopping) {
 		drop(c)
 		return
 	}
+	c.loop.responses -= c.response_bytes
+	c.response_bytes = 0
 	c.started = time.tick_now()
 	shrink_arena(c)
 	next(c)
@@ -379,19 +434,40 @@ fail :: proc(c: ^Conn, status: int) {
 }
 
 @(private)
+body_length :: proc(s: string) -> (int, bool) {
+	n := 0
+	if len(s) == 0 do return 0, false
+	for c in s {
+		if c < '0' || c > '9' do return 0, false
+		n = min(BODY_MAX + 1, n * 10 + int(c - '0'))
+	}
+	return n, true
+}
+
+http_token :: proc(s: string) -> bool {
+	for c in s {
+		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' do continue
+		if !strings.contains_rune("!#$%&'*+-.^_`|~", c) do return false
+	}
+	return len(s) > 0
+}
+
 parse_head :: proc(head: string, req: ^Request) -> bool {
 	lines := strings.split(head, "\r\n")
 	if len(lines) == 0 {
 		return false
 	}
 	parts := strings.split(lines[0], " ")
-	if len(parts) != 3 || !strings.has_prefix(parts[2], "HTTP/1.") {
+	if len(parts) != 3 || !http_token(parts[0]) || (parts[2] != "HTTP/1.0" && parts[2] != "HTTP/1.1") {
 		return false
 	}
 	req.method = parts[0]
 	target := parts[1]
 	if len(target) == 0 || target[0] != '/' {
 		return false
+	}
+	for c in target {
+		if c <= ' ' || c == 127 do return false
 	}
 	if q := strings.index_byte(target, '?'); q >= 0 {
 		req.path = target[:q]
@@ -400,15 +476,35 @@ parse_head :: proc(head: string, req: ^Request) -> bool {
 		req.path = target
 	}
 	req.headers = make([dynamic]Header, 0, len(lines))
+	seen := make(map[string]bool)
+	close, keep := false, false
 	for line in lines[1:] {
 		c := strings.index_byte(line, ':')
 		if c <= 0 {
 			return false
 		}
-		append(&req.headers, Header{line[:c], strings.trim_space(line[c + 1:])})
+		name := strings.to_lower(line[:c])
+		if !http_token(name) do return false
+		raw := line[c + 1:]
+		for b in raw {
+			if b < 32 && b != '\t' || b == 127 do return false
+		}
+		value := strings.trim(raw, " \t")
+		switch name {
+		case "host", "origin", "transfer-encoding", "content-length", "sec-fetch-site", "referer":
+			if seen[name] || value == "" do return false
+			seen[name] = true
+		case "connection":
+			for part in strings.split(value, ",") {
+				token := strings.trim_space(part)
+				if strings.equal_fold(token, "close") do close = true
+				if strings.equal_fold(token, "keep-alive") do keep = true
+			}
+		}
+		append(&req.headers, Header{name, value})
 	}
-	conn := header(req, "connection")
-	req.keep_alive = parts[2] == "HTTP/1.1" ? !strings.equal_fold(conn, "close") : strings.equal_fold(conn, "keep-alive")
+	if parts[2] == "HTTP/1.1" && !seen["host"] do return false
+	req.keep_alive = !close && (parts[2] == "HTTP/1.1" || keep)
 	return true
 }
 
@@ -420,7 +516,7 @@ response_head :: proc(req: ^Request, res: ^Response) -> []u8 {
 		fmt.sbprintf(&b, "content-type: %s\r\n", res.type)
 	}
 	if res.encoding != "" {
-		fmt.sbprintf(&b, "content-encoding: %s\r\nvary: accept-encoding\r\n", res.encoding)
+		fmt.sbprintf(&b, "content-encoding: %s\r\n", res.encoding)
 	}
 	fmt.sbprintf(&b, "content-length: %d\r\n", len(res.body))
 	fmt.sbprintf(&b, "cache-control: %s\r\n", res.cache if res.cache != "" else "no-store")
@@ -447,11 +543,9 @@ url_decode :: proc(s: string, allocator := context.allocator) -> (string, bool) 
 			if i + 2 >= len(s) {
 				return "", false
 			}
-			v, ok := strconv.parse_int(s[i + 1:i + 3], 16)
-			if !ok {
-				return "", false
-			}
-			strings.write_byte(&b, u8(v))
+			v, ok := hex.decode_sequence(s[i + 1:i + 3])
+			if !ok do return "", false
+			strings.write_byte(&b, v)
 			i += 2
 		case:
 			strings.write_byte(&b, c)

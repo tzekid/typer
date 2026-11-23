@@ -358,7 +358,7 @@ history_key :: proc(b: ^strings.Builder, key: rune, g: ^History_Group) {
 		if acc < 95 do level = 3
 		if acc < 90 do level = 4
 	}
-	w(b, `<div class="history-key level-`)
+	w(b, `<button type="button" class="history-key level-`)
 	strings.write_int(b, level)
 	w(b, ` speed-level-`)
 	speed := f64(k.interval) / f64(max(1, k.timed)) / 100
@@ -367,7 +367,7 @@ history_key :: proc(b: ^strings.Builder, key: rune, g: ^History_Group) {
 		speed_level = 1 if speed < 150 else 2 if speed < 225 else 3 if speed < 300 else 4
 	}
 	strings.write_int(b, speed_level)
-	w(b, `" tabindex="0"><span>`)
+	w(b, `"><span>`)
 	engine.html_text(b, analysis_key_text(key))
 	w(b, `</span><small class="history-key-speed">`)
 	if k.timed >= 20 {
@@ -380,7 +380,7 @@ history_key :: proc(b: ^strings.Builder, key: rune, g: ^History_Group) {
 		history_number(b, acc)
 		w(b, `% correct from `)
 		strings.write_int(b, int(k.attempts))
-		w(b, " attempt" if k.attempts == 1 else " attempts")
+		w(b, " attempts")
 		if k.timed >= 20 {
 			w(b, `, `)
 			history_number(b, f64(k.interval) / f64(k.timed) / 100, 0)
@@ -390,17 +390,12 @@ history_key :: proc(b: ^strings.Builder, key: rune, g: ^History_Group) {
 	} else {
 		strings.write_int(b, int(k.attempts))
 		w(b, ` of 20 attempts needed`)
-		if k.timed >= 20 {
-			w(b, `, `)
-			history_number(b, speed, 0)
-			w(b, ` ms mean gap`)
-		}
 	}
-	w(b, `</span></div>`)
+	w(b, `</span></button>`)
 }
 
 render_history_keys :: proc(b: ^strings.Builder, g: ^History_Group) {
-	w(b, `<section class="history-keys" aria-labelledby="keys-title"><div class="history-section-heading"><h2 id="keys-title">Your keys</h2><fieldset class="history-key-choice"><legend class="sr-only">Keyboard measure</legend><label><input type="radio" name="key-view" value="accuracy" checked>Accuracy</label><label><input id="history-speed" type="radio" name="key-view" value="speed">Speed</label></fieldset></div><p class="history-caption history-accuracy-caption">Accuracy for the key you meant to type. Errors count even when you fix them.</p><p class="history-caption history-speed-caption">Mean gap before each correct key, in milliseconds. A longer gap means a slower key.</p>`)
+
 	language := g.setup.setup.language
 	layout := ""
 	rows: [3]string
@@ -411,6 +406,9 @@ render_history_keys :: proc(b: ^strings.Builder, g: ^History_Group) {
 	} else if strings.has_prefix(language, "french") {
 		layout, rows = "AZERTY", {"azertyuiop", "qsdfghjklm", "wxcvbn"}
 	}
+	w(b, `<section class="history-keys" aria-labelledby="keys-title"><div class="history-section-heading"><h2 id="keys-title">Your keys</h2>`)
+	if layout != "" do w(b, `<fieldset class="history-key-choice"><legend class="sr-only">Keyboard measure</legend><label><input type="radio" name="key-view" value="accuracy" checked>Accuracy</label><label><input id="history-speed" type="radio" name="key-view" value="speed">Speed</label></fieldset>`)
+	w(b, `</div><p class="history-caption history-accuracy-caption">Accuracy for the key you meant to type. Errors count even when you fix them.</p><p class="history-caption history-speed-caption">Mean gap before each correct key, in milliseconds. A longer gap means a slower key.</p>`)
 	if layout != "" {
 		w(b, `<div class="history-keyboard" aria-label="`)
 		w(b, layout)
@@ -467,7 +465,8 @@ render_history_keys :: proc(b: ^strings.Builder, g: ^History_Group) {
 		history_number(b, f64(g.deletes) / f64(g.inserts) * 100)
 		w(b, ` deletes per 100 typed characters.</span>`)
 	}
-	w(b, `</p><p class="history-caption history-key-help">Focus or hover a key for counts and timing. Speed needs 20 timed observations.</p>`)
+	w(b, `</p>`)
+	if layout != "" do w(b, `<p class="history-caption history-key-help">Select a key for counts and timing. Speed needs 20 timed observations.</p>`)
 	w(b, `</section>`)
 }
 

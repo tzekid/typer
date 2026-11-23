@@ -68,7 +68,7 @@ Word_Layout :: struct {
 }
 
 LINES_VISIBLE :: 3
-WORDS_AHEAD :: 100
+WORDS_AHEAD :: engine.WORDS_AHEAD
 // Key releases right after the end still count, like upstream's fade-out.
 FINISH_GRACE_MS :: 150
 
@@ -231,9 +231,13 @@ mt_set_pack :: proc "c" (ptr: [^]u8, n: u32) -> b32 {
 	bytes := ptr[:n]
 	p, ok := engine.pack_view(bytes)
 	if !ok {
+		delete(bytes)
 		return false
 	}
 	if s.pack_bytes != nil {
+		s.gen.words = {}
+		s.gen.section = ""
+		s.setup.language = ""
 		delete(s.pack_bytes)
 	}
 	s.pack_bytes = bytes
@@ -286,7 +290,7 @@ mt_start :: proc "c" (mode, mode2: i32, flags: u32, seed_lo, seed_hi: u32) {
 	if flags & 4 != 0 do s.setup.flags += {.Repeated}
 	cfg := engine.Config {
 		mode        = s.setup.mode,
-		mode2       = mode2,
+		mode2       = s.setup.mode2,
 		punctuation = .Punctuation in s.setup.flags,
 		numbers     = .Numbers in s.setup.flags,
 		language    = engine.language_rules(s.setup.language),
@@ -451,6 +455,9 @@ scroll :: proc() {
 	if line >= s.top_line + LINES_VISIBLE - 1 {
 		s.top_line = line - (LINES_VISIBLE - 2)
 		s.full_redraw = true
+	} else if line < s.top_line {
+		s.top_line = max(0, line - 1)
+		s.full_redraw = true
 	}
 	for w, i in s.words {
 		if w.line >= s.top_line {
@@ -465,6 +472,7 @@ scroll :: proc() {
 extras :: proc(i: int) -> []rune {
 	input := engine.word_input(&s.test, i32(i))
 	n := int(s.words[i].runes)
+	if s.words[i].newline && len(input) >= n && input[n-1] != '\n' do n -= 1
 	end := len(input)
 	if end > 0 && i < int(s.test.active) && (input[end - 1] == ' ' || input[end - 1] == '\n') {
 		end -= 1
@@ -639,7 +647,9 @@ mt_delete :: proc "c" (ms: f64, word: b32, remaining: i32) {
 	if s.test.phase >= .Finishing {
 		return
 	}
+	old := s.test.active
 	apply(engine.Raw_Event{ms = ms, kind = .Delete_Word if word else .Delete_Char, arg = remaining})
+	if old != s.test.active do after_input(int(old))
 	after_input(int(s.test.active))
 }
 
@@ -652,6 +662,27 @@ mt_words_ptr :: proc "c" () -> [^]u8 {
 	for w, i in s.words {
 		if i > 0 do append(&s.input_utf8, ' ')
 		append(&s.input_utf8, ..s.texts[w.text_off:w.text_off + w.text_len])
+	}
+	return raw_data(s.input_utf8)
+}
+
+@(export)
+mt_word_count :: proc "c" () -> i32 {
+	return i32(len(s.words))
+}
+
+@(export)
+mt_active_word :: proc "c" () -> i32 {
+	return s.test.active
+}
+
+@(export)
+mt_word_text :: proc "c" (index: i32, typed: b32) -> [^]u8 {
+	context = ctx()
+	clear(&s.input_utf8)
+	if index >= 0 && index < i32(len(s.words)) {
+		rs := engine.word_input(&s.test, index) if typed else engine.target_word(&s.test, index)
+		encode(&s.input_utf8, rs)
 	}
 	return raw_data(s.input_utf8)
 }
@@ -745,7 +776,8 @@ mt_frame :: proc "c" (now: f64) -> u32 {
 
 	if s.test.phase == .Finishing {
 		if now >= s.test.end_ms + FINISH_GRACE_MS {
-			apply(engine.Raw_Event{ms = now, kind = .Finalize})
+			stamp := now if len(s.raw) == 0 else max(now, s.raw[len(s.raw)-1].ms)
+			apply(engine.Raw_Event{ms = stamp, kind = .Finalize})
 		} else {
 			s.next_wake = s.test.end_ms + FINISH_GRACE_MS - now
 		}
@@ -803,7 +835,7 @@ draw_timer :: proc(now: f64) {
 	value: i64 = -1
 	if s.test.phase == .Active {
 		if s.setup.mode == .Time {
-			left := deadline() - now
+			left := clamp(deadline() - now, 0, f64(s.setup.mode2) * 1000)
 			value = i64(math.ceil(max(left, 0) / 1000))
 			wake := math.mod(left, 1000)
 			s.next_wake = wake if s.next_wake < 0 else min(s.next_wake, wake)
@@ -872,6 +904,7 @@ draw_word :: proc(i: int, w: ^Word_Layout, active: int, texts: u32) {
 	input := engine.word_input(&s.test, i32(i))
 	target := engine.target_word(&s.test, i32(i))
 	typed := min(len(input), int(w.runes))
+	if w.newline && typed == int(w.runes) && input[typed-1] != '\n' do typed -= 1
 	pw := s.prefix[w.pw_off:]
 	// runs of correct / incorrect letters, drawn clipped over the base text
 	j := 0
@@ -886,7 +919,14 @@ draw_word :: proc(i: int, w: ^Word_Layout, active: int, texts: u32) {
 	}
 	if ex := extras(i); len(ex) > 0 {
 		ptr, n := scratch_put(ex)
-		text_cmd(.Error_Extra, w.x + w.width, y, ptr, n)
+		x := w.x + w.width
+		if w.newline {
+			x = w.x + pw[w.runes-1]
+			push(Cmd{op = .Rect, color = .Bg, x = x, y = line_top(w.line), a = w.width + w.extra_w - pw[w.runes-1], b = s.line_h})
+			marker, size := scratch_put_string("↵")
+			text_cmd(.Sub, x + w.extra_w, y, marker, size)
+		}
+		text_cmd(.Error_Extra, x, y, ptr, n)
 	}
 	if i < active && !runes_equal(input, target) {
 		push(Cmd{op = .Rect, color = .Error, x = w.x, y = y + s.font_px * 0.62, a = w.width + w.extra_w, b = max(2, s.font_px * 0.06)})

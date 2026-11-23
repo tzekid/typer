@@ -252,6 +252,7 @@ db_history :: proc(db: ^Db, user_id: i64) -> ^History {
 		})
 	}
 	slice.stable_sort_by(h.groups[:], proc(a, b: History_Group) -> bool {
+		if (len(a.valid) > 0) != (len(b.valid) > 0) do return len(a.valid) > 0
 		return len(a.all) > len(b.all)
 	})
 	// Least recently used typists leave until this one fits both budgets.

@@ -41,8 +41,12 @@ async function run() {
       const cookie = saved.headers.get('set-cookie').split(';')[0];
       const token = cookie.split('=')[1];
       const claimed = await fetch(base + '/key/' + token, { redirect: 'manual' });
-      assert.equal(claimed.status, 303);
-      assert.equal(claimed.headers.get('set-cookie').split(';')[0], cookie);
+      assert.equal(claimed.status, 200);
+      assert.equal(claimed.headers.get('set-cookie'), null);
+      const confirmed = await fetch(base + '/key', { method: 'POST', redirect: 'manual',
+        headers: { origin: base }, body: new URLSearchParams({ token }) });
+      assert.equal(confirmed.status, 303);
+      assert.equal(confirmed.headers.get('set-cookie').split(';')[0], cookie);
       await fetch(base + '/healthz');
       await new Promise(resolve => setTimeout(resolve, 50));
       assert(!log.includes(token), 'request log exposed the key token');

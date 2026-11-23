@@ -5,6 +5,7 @@ import "core:crypto"
 import "core:crypto/sha2"
 import "core:encoding/hex"
 import "core:strings"
+import "core:net"
 import "core:sync"
 import "core:time"
 import "core:unicode"
@@ -135,14 +136,21 @@ limiter: struct {
 }
 
 client_address :: proc(req: ^Request) -> string {
-	xff := header(req, "x-forwarded-for")
-	if xff == "" {
-		return "local"
+	addr := req.peer
+	if addr == net.IP4_Loopback || addr == net.IP6_Loopback {
+		// Caddy overwrites/appends the final hop; never trust a forwarded chain from a direct peer.
+		raw := header(req, "x-forwarded-for")
+		if comma := strings.last_index_byte(raw, ','); comma >= 0 do raw = raw[comma+1:]
+		raw = strings.trim_space(raw)
+		if len(raw) > 0 && len(raw) <= 45 {
+			if forwarded := net.parse_address(raw); forwarded != nil do addr = forwarded
+		}
 	}
-	if c := strings.index_byte(xff, ','); c >= 0 {
-		return strings.trim_space(xff[:c])
+	if ip, ok := addr.(net.IP6_Address); ok {
+		for i in 4 ..< 8 do ip[i] = 0
+		addr = ip
 	}
-	return strings.trim_space(xff)
+	return net.address_to_string(addr)
 }
 
 allow_write :: proc(req: ^Request) -> bool {
@@ -152,9 +160,9 @@ allow_write :: proc(req: ^Request) -> bool {
 		limiter.buckets = make(map[string]Bucket, 64, runtime.heap_allocator())
 		limiter.pruned = now
 	}
-	if time.tick_diff(limiter.pruned, now) > time.Hour {
+	if time.tick_diff(limiter.pruned, now) > time.Minute * 5 {
 		for k, v in limiter.buckets {
-			if time.tick_diff(v.last, now) > time.Hour {
+			if time.tick_diff(v.last, now) > time.Minute * 5 {
 				delete_key(&limiter.buckets, k)
 				delete(k, runtime.heap_allocator())
 			}
@@ -164,6 +172,7 @@ allow_write :: proc(req: ^Request) -> bool {
 	addr := client_address(req)
 	b, ok := limiter.buckets[addr]
 	if !ok {
+		if len(limiter.buckets) >= 4096 do return false
 		b = Bucket{tokens = LIMIT_BURST, last = now}
 		addr = strings.clone(addr, runtime.heap_allocator())
 	}

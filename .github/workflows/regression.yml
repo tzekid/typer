@@ -1,0 +1,48 @@
+name: Typing regressions
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y llvm-18-dev clang-18 lld-18 brotli libsqlite3-dev
+          echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
+      - name: Build pinned Odin
+        env:
+          LLVM_CONFIG: llvm-config-18
+          CXX: clang++-18
+        run: |
+          git init -q "$RUNNER_TEMP/odin"
+          git -C "$RUNNER_TEMP/odin" fetch -q --depth=1 https://github.com/odin-lang/Odin.git 84bc3fc2100b0f7880a3af37f71bccdcda41c6f9
+          git -C "$RUNNER_TEMP/odin" checkout -q FETCH_HEAD
+          cd "$RUNNER_TEMP/odin"
+          ./build_odin.sh nightly
+          echo "$PWD" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test engine, packs, HTTP handlers and database
+        run: ./scripts/test.sh
+      - name: Install test browsers
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser-tests" playwright@1.61.1
+          "$RUNNER_TEMP/browser-tests/node_modules/.bin/playwright" install --with-deps chromium webkit
+          echo "NODE_PATH=$RUNNER_TEMP/browser-tests/node_modules" >> "$GITHUB_ENV"
+      - name: Test browser flows
+        run: |
+          for browser in chromium webkit; do
+            export TEST_BROWSER="$browser" CHART_BROWSER="$browser"
+            for suite in canvas reliability charts navigation; do
+              node "tests/$suite.cjs"
+            done
+          done

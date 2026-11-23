@@ -29,6 +29,7 @@ Result :: struct {
 	key_consistency:    f64,
 	key_overlap:        f64,
 	chart_wpm:          []f64,
+	chart_seconds:      []f64,
 	chart_raw:          []f64,
 	chart_burst:        []f64,
 	chart_err:          []f64,
@@ -357,12 +358,11 @@ count_chars :: proc(input: []rune, target: []rune, credit_partial: bool) -> Char
 			break
 		}
 	}
-	n := max(len(input), len(target))
-	for i in 0 ..< n {
-		have_in, have_tg := i < len(input), i < len(target)
-		ic := input[i] if have_in else 0
+	if !credit_partial do c.missed = i32(max(0, len(target) - len(input)))
+	for ic, i in input {
+		have_tg := i < len(target)
 		tc := target[i] if have_tg else 0
-		if have_in == have_tg && ic == tc {
+		if have_tg && ic == tc {
 			if tc == ' ' && !word_correct {
 				c.extra += 1
 			} else {
@@ -371,10 +371,7 @@ count_chars :: proc(input: []rune, target: []rune, credit_partial: bool) -> Char
 			if word_correct || (credit_partial && partially_correct) {
 				c.correct_word += 1
 			}
-		} else if !have_in {
-			if !credit_partial {
-				c.missed += 1
-			}
+
 		} else if !have_tg || (tc == ' ' && ic != ' ' && !input_has_space) {
 			c.extra += 1
 		} else {
@@ -434,6 +431,15 @@ replay_apply :: proc(r: ^Word_Replay, t: ^Test, e: Event) {
 		return
 	}
 	w := e.word_index
+	if .Cleared_Next_Word in e.flags {
+		next := w + 1
+		r.input_len[next] = 0
+		r.last_is_sp[next] = false
+		if !r.is_dirty[next] {
+			r.is_dirty[next] = true
+			append(&r.dirty, next)
+		}
+	}
 	if !r.seen[w] {
 		r.seen[w] = true
 		r.pos[w] = i32(len(r.order))
@@ -565,6 +571,7 @@ history :: proc(t: ^Test, boundaries: []f64, kind: History_Kind, allocator := co
 				continue
 			}
 			w := e.word_index
+			if .Cleared_Next_Word in e.flags && r.input_len[w + 1] > 0 do fenwick_add(filled, int(w + 1), -1)
 			had := r.input_len[w] > 0
 			replay_apply(&r, t, e)
 			if has := r.input_len[w] > 0; has != had {
@@ -660,6 +667,31 @@ build_result :: proc(t: ^Test, allocator := context.allocator) -> Result {
 	res.chart_raw = history(t, boundaries, .Raw, allocator)
 	res.chart_burst = burst
 	res.chart_err = error_count_history(t, boundaries, allocator)
+	// Keep full-resolution scoring above. Bound the chart on long sessions.
+	points := min(len(boundaries), 300)
+	res.chart_seconds = make([]f64, points, allocator)
+	start := 0
+	for i in 0 ..< points {
+		end := (i + 1) * len(boundaries) / points
+		last := end - 1
+		res.chart_seconds[i] = boundaries[last] / 1000
+		res.chart_wpm[i] = res.chart_wpm[last]
+		res.chart_raw[i] = res.chart_raw[last]
+		errors, weighted_burst := 0.0, 0.0
+		previous := 0.0 if start == 0 else boundaries[start - 1]
+		for j in start ..< end {
+			errors += res.chart_err[j]
+			left := 0.0 if j == 0 else boundaries[j - 1]
+			weighted_burst += res.chart_burst[j] * (boundaries[j] - left)
+		}
+		res.chart_err[i] = errors
+		res.chart_burst[i] = weighted_burst / (boundaries[last] - previous)
+		start = end
+	}
+	res.chart_wpm = res.chart_wpm[:points]
+	res.chart_raw = res.chart_raw[:points]
+	res.chart_err = res.chart_err[:points]
+	res.chart_burst = res.chart_burst[:points]
 	res.key_spacing = spacing
 	res.key_duration = key_durations(t, allocator)
 	res.key_overlap = key_overlap(t)
