@@ -388,6 +388,13 @@ test_page :: proc(req: ^Request, res: ^Response) {
 			page.seed = seed
 			page.from = pos
 			page.quotes = deal_quotes(collection, s.quotes, seed, pos, DEAL)
+			if len(page.quotes) == 0 && s.quotes != QUOTE_ALL {
+				s.quotes = QUOTE_ALL
+				q := strings.builder_make()
+				setup_query(&q, s)
+				redirect(res, strings.concatenate({"/?", strings.to_string(q)}))
+				return
+			}
 		}
 	}
 	if req.query != "" {
@@ -523,8 +530,8 @@ Replayed :: struct {
 
 // Re-derives everything about a test from its record, and for quotes checks
 // that the words typed are that quote's.
-replay :: proc(record: []u8, verify_targets := false) -> (r: Replayed, ok: bool) {
-	setup, events, dok := engine.record_decode(record, &r.test)
+replay :: proc(record: []u8, verify_targets := false, upload := false) -> (r: Replayed, ok: bool) {
+	setup, events, dok := engine.record_decode(record, &r.test, upload = upload)
 	if !dok {
 		return {}, false
 	}
@@ -599,7 +606,7 @@ post_result :: proc(req: ^Request, res: ^Response) {
 		respond_text(res, 429, "slow down")
 		return
 	}
-	r, ok := replay(req.body, verify_targets = true)
+	r, ok := replay(req.body, verify_targets = true, upload = true)
 	if !ok {
 		respond_text(res, 400, "not a complete typer record")
 		return

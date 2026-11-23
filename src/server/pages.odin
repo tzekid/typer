@@ -229,6 +229,8 @@ Test_Page :: struct {
 
 render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	s := t.setup
+	collection := quote_collection(s.language)
+	word_language := s.language if known_language(s.language) else DEFAULT_SETUP.language
 	page_start(b, p, "typer", "test", {"DMMono-latin.woff2", "core.wasm"})
 	// The bar keeps its width whatever the mode: punctuation and numbers dim
 	// for quotes, and every mode's options share one stacked slot.
@@ -248,6 +250,7 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 	for m in ([?]engine.Mode{.Time, .Words, .Quote}) {
 		x := s
 		x.mode = m
+		if m != .Quote do x.language = word_language
 		if m != s.mode {
 			x.mode2 = 30 if m == .Time else 25
 		}
@@ -265,10 +268,12 @@ render_test_page :: proc(b: ^strings.Builder, p: Page, t: Test_Page) {
 			x.quotes = QUOTE_ALL
 			mode_link(b, "all", x, here && s.quotes == QUOTE_ALL)
 			for name, g in engine.QUOTE_GROUP_NAMES {
+				if collection != nil && collection.counts[g] == 0 do continue
 				x.quotes = 1 << u32(g)
 				mode_link(b, name, x, here && s.quotes == x.quotes)
 			}
 		} else {
+			x.language = word_language
 			options := [?]i32{15, 30, 60, 120} if m == .Time else [?]i32{10, 25, 50, 100}
 			for n in options {
 				x.mode2 = n
@@ -461,9 +466,10 @@ render_leaderboard_page :: proc(b: ^strings.Builder, p: Page, board: Board, rows
 	// The same bar as the test page: a mode, then its options in one
 	// stacked slot so the bar keeps its width.
 	quote_lang := engine.quote_language(board.language)
+	word_language := board.language if known_language(board.language) else DEFAULT_SETUP.language
 	w(b, `<nav class="bar" aria-label="leaderboard"><span class="group">`)
-	board_link(b, "time", Board{mode = .Time, mode2 = 30, language = board.language}, board.mode == .Time)
-	board_link(b, "words", Board{mode = .Words, mode2 = 25, language = board.language}, board.mode == .Words)
+	board_link(b, "time", Board{mode = .Time, mode2 = 30, language = word_language}, board.mode == .Time)
+	board_link(b, "words", Board{mode = .Words, mode2 = 25, language = word_language}, board.mode == .Words)
 	board_link(b, "quote", Board{mode = .Quote, qgroup = 1, language = quote_lang}, board.mode == .Quote)
 	w(b, `</span><i class="sep"></i><span class="group stack">`)
 	for m in ([?]engine.Mode{.Time, .Words, .Quote}) {
@@ -477,7 +483,7 @@ render_leaderboard_page :: proc(b: ^strings.Builder, p: Page, board: Board, rows
 			}
 		} else {
 			for n in (BOARD_TIMES if m == .Time else BOARD_WORDS) {
-				board_link(b, int_label(n), Board{mode = m, mode2 = n, language = board.language}, here && board.mode2 == n)
+				board_link(b, int_label(n), Board{mode = m, mode2 = n, language = word_language}, here && board.mode2 == n)
 			}
 		}
 		w(b, `</span>`)

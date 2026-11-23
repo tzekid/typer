@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:crypto"
 import "core:crypto/sha2"
 import "core:encoding/hex"
+import "core:hash"
 import "core:strings"
 import "core:net"
 import "core:sync"
@@ -132,6 +133,7 @@ Bucket :: struct {
 limiter: struct {
 	lock:    sync.Mutex,
 	buckets: map[string]Bucket,
+	overflow: [64]Bucket,
 	pruned:  time.Tick,
 }
 
@@ -170,18 +172,23 @@ allow_write :: proc(req: ^Request) -> bool {
 		limiter.pruned = now
 	}
 	addr := client_address(req)
-	b, ok := limiter.buckets[addr]
+	b, ok := &limiter.buckets[addr]
 	if !ok {
-		if len(limiter.buckets) >= 4096 do return false
-		b = Bucket{tokens = LIMIT_BURST, last = now}
-		addr = strings.clone(addr, runtime.heap_allocator())
+		if len(limiter.buckets) < 4096 - len(limiter.overflow) {
+			addr = strings.clone(addr, runtime.heap_allocator())
+			limiter.buckets[addr] = {}
+			b = &limiter.buckets[addr]
+		} else {
+			// Keep serving new addresses at a bounded shared rate until pruning.
+			b = &limiter.overflow[hash.fnv64a(transmute([]u8)addr) % len(limiter.overflow)]
+		}
 	}
+	if b.last == (time.Tick{}) do b^ = Bucket{tokens = LIMIT_BURST, last = now}
 	b.tokens = min(LIMIT_BURST, b.tokens + time.duration_seconds(time.tick_diff(b.last, now)) * LIMIT_PER_SECOND)
 	b.last = now
 	allowed := b.tokens >= 1
 	if allowed {
 		b.tokens -= 1
 	}
-	limiter.buckets[addr] = b
 	return allowed
 }
